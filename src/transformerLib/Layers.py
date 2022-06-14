@@ -9,10 +9,10 @@ from torch.nn import functional as F
 
 
 # perform library imports
-from superTransformerLib.src import Glimpses
+from src.transformerLib import Glimpses
 
 ### Head accommodation on the linear layer ###
-from superTransformerLib.src.Linear import Linear
+from src.transformerLib.Linear import Linear
 
 
 class BandedMultiheadedAttention(nn.Module):
