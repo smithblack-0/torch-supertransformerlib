@@ -1,8 +1,8 @@
 import unittest
 import torch
 
-from src.transformerLib import Layers
-from src.transformerLib.Linear import Linear
+from src.supertransformerlib import Layers
+from src.supertransformerlib.Linear import Linear
 
 class testLinear(unittest.TestCase):
     """

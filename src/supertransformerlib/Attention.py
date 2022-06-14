@@ -3,8 +3,8 @@ from typing import Optional, List
 import torch
 from torch import nn
 
-from src.transformerLib.Linear import Linear
-from src.transformerLib import Glimpses
+from src.supertransformerlib.Linear import Linear
+from src.supertransformerlib import Glimpses
 
 
 def _dot_product_attention(
