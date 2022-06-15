@@ -209,6 +209,7 @@ class test_LCSA(unittest.TestCase):
         query = torch.randn([3, 5, 10, 32])
         layer = Attention.LCSA(32, 4, [1, 2, 5, 10])
         local_conditioning = layer(query)
+
         self.assertTrue(shape_equal([3, 5, 10, 32], local_conditioning.shape))
     def test_ensemble(self):
         """ test whether operating in ensemble mode causes any bugs"""

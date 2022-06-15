@@ -2,6 +2,7 @@ from typing import Optional, List
 
 import torch
 from torch import nn
+from torch.nn import functional as F
 
 from src.supertransformerlib.Linear import Linear
 from src.supertransformerlib import Glimpses
@@ -371,6 +372,11 @@ class LCSA(nn.Module):
     Multiple padding options exist allowing conditioning
     to be done based on only words that came before, only
     words that come after, or a centered view with both.
+
+    One thing of note: The number of words passed into
+    the layer MUST be equal to or greater than the kernel width.
+    Remember to pad to above this length.
+
     """
     def __init__(self,
                  d_model: int,
@@ -409,12 +415,17 @@ class LCSA(nn.Module):
         self.key_projector = Linear(d_model, head_width, [ensemble, heads, kernel_width])
         self.value_projector = Linear(d_model, head_width, [ensemble, heads, kernel_width])
         self.dehead = Linear([heads, head_width], d_model, ensemble)
+
     def forward(self, tensor: torch.Tensor, mask: Optional[torch.Tensor] = None) -> torch.Tensor:
         #Tensor: (..., (ensemble), items, embedding)
 
         #Ensure ensemble
         if self.ensemble is False:
             tensor = tensor.unsqueeze(-3) #(..., ensemble, items, embedding
+        if self.kernel_width > tensor.shape[-2]:
+            raise RuntimeError("Kernel requires items dim to be length %s, but received tensor of length %s" %
+                               (self.kernel_width, tensor.shape[-2]))
+
         tensor = tensor.transpose(-2, -1) #(..., ensemble, embedding, items)
 
         #Localize
