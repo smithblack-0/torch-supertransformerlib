@@ -11,6 +11,7 @@ build:
   tools:
     python: "3.9"
 
+# Set to make docs
 mkdocs:
   configuration: mkdocs.yml
   fail_on_warning: true

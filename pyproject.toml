@@ -1,0 +1,4 @@
+[build-system]
+requires = ["setuptools", "mkdocs"]
+build-backend = "setuptools.build_meta"
+
