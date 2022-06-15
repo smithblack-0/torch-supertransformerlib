@@ -11,10 +11,9 @@ build:
   tools:
     python: "3.9"
 
-# Set to make docs
-mkdocs:
-  configuration: mkdocs.yml
-  fail_on_warning: true
+# Set to sphinx:
+sphinx:
+  fail_on_warning: false
 
 # Optionally declare the Python requirements required to build your docs
 python:
