@@ -1,1 +1,4 @@
-site_name: My Docs
+site_name: supertransformlib Documentation
+nav:
+  - Home: index.md
+  - License: license.md
