@@ -36,7 +36,9 @@ with little worry.
 Third, with the exception of Multiheaded Attention,
 every layer listed below impliments a variation of 
 transformer existing in an O space of less than O(N^2) with
-respect to words provided.
+respect to words provided. It should be noted that parameter
+usage is frequently moderately higher, and signicantly higher
+if a naive ensemble is used.
 
 As of 6/14/2022, the layers available are:
 
@@ -60,9 +62,29 @@ tensor output summarizing global trends in an order
 independent manner.
 * LCSA: Use this to capture order based contextual information
 among nearby tensors. This is a banded attention.
+* EESA: Use this only when processing an ensemble tensor. It allows
+the exchange of data from lower level ensembles to higher level ones, but not vice versa.
 * GLSA: Pair this up with LCSA for handling global 
 relations between entities.
 * GSPU: Use this, with an internal transformer stack, when the model really
 needs to be able to reason about the big picture.
 
-## Glimpse
+## Linear
+
+Linear is a core layer, and a rebuild of torch's
+linear layer in an ensemble capable format. See the 
+class for details
+
+## Glimpses
+
+The Glimpses package contains a few functions which
+are useful for dealing with local operations and reshaping.
+
+In particular, Glimpses contains an operation called "local" 
+which is capable of returning a view of a tensor which is 
+exactly the same as would be seen from a convolution kernel.
+
+## Loss
+
+Loss contains some experimental loss functions which may
+be useful on an ensemble of outputs.
