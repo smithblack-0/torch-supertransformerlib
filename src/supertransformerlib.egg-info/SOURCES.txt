@@ -1,0 +1,13 @@
+README.md
+setup.cfg
+setup.py
+src/supertransformerlib/Attention.py
+src/supertransformerlib/Glimpses.py
+src/supertransformerlib/Layers.py
+src/supertransformerlib/Linear.py
+src/supertransformerlib/Loss.py
+src/supertransformerlib/__init__.py
+src/supertransformerlib.egg-info/PKG-INFO
+src/supertransformerlib.egg-info/SOURCES.txt
+src/supertransformerlib.egg-info/dependency_links.txt
+src/supertransformerlib.egg-info/top_level.txt
