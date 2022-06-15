@@ -14,6 +14,6 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CONFIG_FILE: docs/mkdocs.yml
-          EXTRA_PACKAGES: build-base
+          EXTRA_PACKAGES: build-base, torch
           # GITHUB_DOMAIN: github.myenterprise.com
           REQUIREMENTS: docs/requirements.txt
