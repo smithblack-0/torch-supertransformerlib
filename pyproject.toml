@@ -1,4 +1,4 @@
 [build-system]
-requires = ["setuptools", "mkdocs", "torch"]
+requires = ["setuptools", "mkdocs", "torch", "myst-parser"]
 build-backend = "setuptools.build_meta"
 
