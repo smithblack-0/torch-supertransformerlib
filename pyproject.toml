@@ -17,6 +17,7 @@ keywords = [
 ]
 dependencies = ["torch >= 1.11", "numpy"]
 dynamic = ["version", "description"]
+requires_python = ">=3.8"
 
 [project.optional-dependencies]
 doc = ["sphinx", "myst-parser"]
