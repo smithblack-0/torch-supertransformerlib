@@ -14,4 +14,6 @@ It has the following desirable properties when used correctly
 * O(N) with respect to words input (configured correctly)
 * Ensembles natively supported.
 
+## Documentation
+
 See https://torch-supertransformerlib.readthedocs.io/en/latest/ for documentation

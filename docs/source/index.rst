@@ -10,6 +10,7 @@ Welcome to supertransformerlib's documentation!
    :maxdepth: 2
 
    README.md
+   license.md
 
 What is this?
 ===========
