@@ -10,7 +10,7 @@ authors = [
 ]
 readme = "README.md"
 license = {text = "docs/source/license.md"}
-classifiers = [
+keywords = [
     "torch",
     "transformer",
     "transformers"
