@@ -17,34 +17,35 @@ jobs:
     - uses: actions/setup-python@v3
       with:
         python-version: '3.8'
-    name: setupenv
-    run: |
-      python -m pip install --upgrade pip
-      pip install flake8
-    name: lint with flake8
-    run: |
-      flake8 .\src\ --count --select=E9,F63,F7,F82 --show-source --statistics
-      flake8 .\src\ --count --show-source --statistics --max-line-length 130      
+    - name: setupenv
+      run: |
+        python -m pip install --upgrade pip
+        pip install flake8
       
-    tests:
-      runs-on: ${{ matrix.os }}
-      needs: linter
-      strategy:
-        matrix:
-          python-version: ["3.8", "3.9", "3.10"]
-          os: [ubuntu-latest, windows-latest]
-      steps:
-        uses: actions/checkout@v3
-        name: Set up python ${{matrix.python-version}}
-        uses: actions/setup-python@v3
+    - name: lint
+      run: |
+        flake8 .\src\ --count --select=E9,F63,F7,F82 --show-source --statistics
+        flake8 .\src\ --count --show-source --statistics --max-line-length 130      
+      
+  tests:
+    runs-on: ${{ matrix.os }}
+    needs: linter
+    strategy:
+      matrix:
+        python-version: ["3.8", "3.9", "3.10"]
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v3
+      - name: Set up python ${{matrix.python-version}}
+      - uses: actions/setup-python@v3
         with:
           python-version: ${{matrix.python-version}}
-        name: Install Python dependencies
+      - name: Install Python dependencies
         uses: py-actions/py-dependency-install@v3
         with:
           path: "requirements.txt"
-        name: Test with pytest
+      - name: Test with pytest
         run: |
           pytest
-        
-        
+
+
