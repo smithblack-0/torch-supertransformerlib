@@ -1,13 +1,14 @@
 #This workflow is designed to trigger on 
 #push events, and shall run the unit tests
 
-name: Python tests
+name: Python test then publish
 
 on:
   push:
     branches: [ $default-branch ]
   pull_request:
     branches: [ $default-branch ]
+  workflow_dispatch:
 
 jobs:
   linter: 
