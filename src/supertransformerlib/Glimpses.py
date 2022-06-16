@@ -6,19 +6,12 @@ minimal padding. It extends the native torch functions in ways that I find usefu
 All items within this module are functions. They all accept a tensor and parameters, then
 do something with it. They also tend to return views to allow efficient memory utilization.
 
-The current functions available are.
-
-view
-local
-
-
 """
 import torch
 from torch import nn
 from torch.nn import functional as F
 from typing import Union, Sequence, List, Tuple
 
-@torch.jit.script
 def view(tensor,
          input_shape: Union[torch.Tensor, List[int], int],
          output_shape: Union[torch.Tensor, List[int], int]) -> torch.Tensor:
@@ -84,7 +77,6 @@ def view(tensor,
     output: torch.Tensor = tensor.reshape(final_shape)
     return output
 
-@torch.jit.script
 def reshape(tensor,
             input_shape: Union[torch.Tensor, List[int], int],
             output_shape: Union[torch.Tensor, List[int], int]) -> torch.Tensor:
