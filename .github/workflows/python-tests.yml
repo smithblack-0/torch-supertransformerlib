@@ -31,15 +31,15 @@ jobs:
         flake8 src --count --show-source --statistics --max-line-length 130      
         
   tests:
+    runs-on: ${{ matrix.os }}
     needs: linter
     strategy:
       matrix:
         python-version: ["3.8", "3.9", "3.10"]
         os: [ubuntu-latest, windows-latest]
-    runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v3
       - name: Set up python ${{matrix.python-version}}
+      - uses: actions/checkout@v3
       - uses: actions/setup-python@v3
         with:
           python-version: ${{matrix.python-version}}
