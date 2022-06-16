@@ -9,6 +9,7 @@ from typing import Union, List, Optional, Dict
 
 import torch
 from torch import nn
+
 from . import Glimpses
 
 

@@ -1,6 +1,6 @@
 """
 
-This is a module for the manipulation of tensors by means of lightweight memory views and 
+This is a module for the manipulation of tensors by means of lightweight memory views and
 minimal padding. It extends the native torch functions in ways that I find useful.
 
 All items within this module are functions. They all accept a tensor and parameters, then
@@ -9,9 +9,8 @@ do something with it. They also tend to return views to allow efficient memory u
 """
 
 import torch
-from torch import nn
 from torch.nn import functional as F
-from typing import Union, Sequence, List, Tuple
+from typing import Union, List
 
 
 def view(tensor,
@@ -67,8 +66,8 @@ def view(tensor,
     torch.jit.annotate(torch.Tensor, output_shape)
 
     # Basic sanity testing
-    assert input_shape.prod() == output_shape.prod() \
-        , "Shapes incompatible: Input shape and output shape were not compatible: "
+    assert input_shape.prod() == output_shape.prod(), \
+        "Shapes incompatible: Input shape and output shape were not compatible: "
 
     # Perform view action.
     slice_length: int = len(input_shape)
@@ -134,8 +133,8 @@ def reshape(tensor,
     torch.jit.annotate(torch.Tensor, output_shape)
 
     # Basic sanity testing
-    assert input_shape.prod() == output_shape.prod() \
-        , "Shapes incompatible: Input shape and output shape were not compatible: "
+    assert input_shape.prod() == output_shape.prod(), \
+        "Shapes incompatible: Input shape and output shape were not compatible: "
 
     # Perform view action.
     slice_length: int = len(input_shape)

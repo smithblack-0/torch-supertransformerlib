@@ -255,9 +255,6 @@ class BandedMultiheadedAttention(nn.Module):
         assert query.shape[-1] == self.d_model
         assert key.shape[-2] == value.shape[-2]
 
-        query_kernel = self.query_kernel
-        content_kernel = self.content_kernel
-
         if self.run_pad:
             revised_query, revised_key, revised_value = self.pad(query, key, value)
         else:
