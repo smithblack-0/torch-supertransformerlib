@@ -40,14 +40,10 @@ class Linear(nn.Module):
 
     """
 
-
-
-
-
     def __init__(self,
                  input_shape: Union[torch.Tensor, List[int], int],
                  output_shape: Union[torch.Tensor, List[int], int],
-                 ensemble_shapes: Optional[Union[torch.Tensor, List[int], int]]=None):
+                 ensemble_shapes: Optional[Union[torch.Tensor, List[int], int]] = None):
         """
 
         :param input_shape: The shape of the input. May be an int, or a list/tuple of ints,
@@ -86,7 +82,7 @@ class Linear(nn.Module):
 
         if head_shapes is not None:
 
-            kernel_shape = [*head_shapes, output_shape.prod(),input_shape.prod()]
+            kernel_shape = [*head_shapes, output_shape.prod(), input_shape.prod()]
             bias_shape = [*head_shapes, output_shape.prod()]
         else:
             kernel_shape = [output_shape.prod(), input_shape.prod()]
@@ -105,6 +101,7 @@ class Linear(nn.Module):
 
         self._kernel = nn.Parameter(kernel)
         self._bias = nn.Parameter(bias)
+
     def forward(self, tensor):
 
         # Flatten the relevent dimensions
@@ -139,10 +136,6 @@ class NamedLinear(nn.Module):
 
     """
 
-
-
-
-
     def __init__(self,
                  input_shape: Dict[str, int],
                  output_shape: Dict[str, int],
@@ -167,7 +160,7 @@ class NamedLinear(nn.Module):
 
         if head_shapes is not None:
 
-            kernel_shape = [*head_shapes, output_shape.prod(),input_shape.prod()]
+            kernel_shape = [*head_shapes, output_shape.prod(), input_shape.prod()]
             bias_shape = [*head_shapes, output_shape.prod()]
         else:
             kernel_shape = [output_shape.prod(), input_shape.prod()]
@@ -186,14 +179,14 @@ class NamedLinear(nn.Module):
 
         self._kernel = nn.Parameter(kernel)
         self._bias = nn.Parameter(bias)
-    def forward(self, tensor):
 
+    def forward(self, tensor):
 
         # Perform primary processing. Add an extra dimension on the end
         # of the input tensor to handle the matrix multiply, perform
         # matrix multiply, then add bias
         shape = tensor.shape[:-len(self._input_shape)]
-        tensor = tensor.flatten(0, -len(self._input_shape)-1)
+        tensor = tensor.flatten(0, -len(self._input_shape) - 1)
 
         tensor = tensor.unsqueeze(-1)
         tensor = self._kernel.matmul(tensor)

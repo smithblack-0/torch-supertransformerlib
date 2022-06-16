@@ -8,10 +8,10 @@ from . import Glimpses
 
 
 def _dot_product_attention(
-                           query: torch.Tensor,
-                           key: torch.Tensor,
-                           value: torch.Tensor,
-                           mask: Optional[torch.Tensor] = None):
+        query: torch.Tensor,
+        key: torch.Tensor,
+        value: torch.Tensor,
+        mask: Optional[torch.Tensor] = None):
     """
     Performs dot product attention, as
     shown in "attention is all you need"
@@ -29,8 +29,9 @@ def _dot_product_attention(
         logits = logits.masked_fill(mask, -1e+8)
     score = torch.softmax(logits, dim=-1)
     attn = torch.matmul(score, value)
-    attn = attn/torch.sqrt(torch.tensor([query.shape[-1]]))
+    attn = attn / torch.sqrt(torch.tensor([query.shape[-1]]))
     return attn
+
 
 class FeedForward(nn.Module):
     """
@@ -45,6 +46,7 @@ class FeedForward(nn.Module):
 
     See 'Attention is all you need' for details.
     """
+
     def __init__(self,
                  d_model: int,
                  d_internal: int = 2048,
@@ -74,19 +76,17 @@ class FeedForward(nn.Module):
 
         """
         if self.ensembles is False:
-            tensor = tensor.unsqueeze(-3) #(..., ensemble, items, embedding)
+            tensor = tensor.unsqueeze(-3)  # (..., ensemble, items, embedding)
 
-        tensor = tensor.transpose(-2, -3)  #(..., items, ensemble, embedding)
-        tensor = self.ff1(tensor) #(..., item, ensemble, internal)
+        tensor = tensor.transpose(-2, -3)  # (..., items, ensemble, embedding)
+        tensor = self.ff1(tensor)  # (..., item, ensemble, internal)
         tensor = self.activation(tensor)
-        tensor = self.ff2(tensor) #(..., item, ensemble, embedding)
-        tensor = tensor.transpose(-2, -3) #(..., ensemble, item, embedding)
+        tensor = self.ff2(tensor)  # (..., item, ensemble, embedding)
+        tensor = tensor.transpose(-2, -3)  # (..., ensemble, item, embedding)
 
         if self.ensembles is False:
             tensor = tensor.squeeze(-3)
         return tensor
-
-
 
 
 class MultiHeadedAttention(nn.Module):
@@ -124,7 +124,7 @@ class MultiHeadedAttention(nn.Module):
         head_width = d_query // heads
         if ensembles is None:
             ensembles = 1
-            self.ensembles =  False
+            self.ensembles = False
         else:
             self.ensembles = True
 
@@ -134,11 +134,11 @@ class MultiHeadedAttention(nn.Module):
         self.collapse_projector = Linear([heads, head_width], d_output, ensembles)
 
     def forward(self,
-                query: torch.Tensor, #(..., (ensemble), item, embedding)
-                key: torch.Tensor, #(...., (ensemble), item, embedding)
-                value: torch.Tensor, #(..., (ensemble), item, embedding)
+                query: torch.Tensor,  # (..., (ensemble), item, embedding)
+                key: torch.Tensor,  # (...., (ensemble), item, embedding)
+                value: torch.Tensor,  # (..., (ensemble), item, embedding)
                 mask: Optional[torch.Tensor] = None) -> torch.Tensor:
-            """
+        """
 
 
             :param query: The query. Of shape (..., (ensemble), items, embedding)
@@ -148,40 +148,41 @@ class MultiHeadedAttention(nn.Module):
             :return: tensor. Attention result
             """
 
-            #Prep query, key and value
+        # Prep query, key and value
 
-            if self.ensembles is False:
-                query = query.unsqueeze(-3) #(..., ensemble, items, embeddings)
-                key = key.unsqueeze(-3)
-                value = value.unsqueeze(-3)
+        if self.ensembles is False:
+            query = query.unsqueeze(-3)  # (..., ensemble, items, embeddings)
+            key = key.unsqueeze(-3)
+            value = value.unsqueeze(-3)
 
-            if mask is not None:
-                mask = mask.unsqueeze(-3) #(..., ensemble, items, content_items)
+        if mask is not None:
+            mask = mask.unsqueeze(-3)  # (..., ensemble, items, content_items)
 
-            query = query.transpose(-2, -3) #(..., item, ensemble, content_items)
-            key = key.transpose(-2, -3)
-            value = value.transpose(-2,-3)
+        query = query.transpose(-2, -3)  # (..., item, ensemble, content_items)
+        key = key.transpose(-2, -3)
+        value = value.transpose(-2, -3)
 
-            headed_query = self.query_projector(query) #(..., item, ensemble, head, head_dim)
-            headed_key = self.key_projector(key) #(..., item_b, ensemble, head, head_dim)
-            headed_value = self.value_projector(value) #(..., item_b, ensemble, head, head_dim)
+        headed_query = self.query_projector(query)  # (..., item, ensemble, head, head_dim)
+        headed_key = self.key_projector(key)  # (..., item_b, ensemble, head, head_dim)
+        headed_value = self.value_projector(value)  # (..., item_b, ensemble, head, head_dim)
 
-            headed_query = headed_query.transpose(-2, -4) #(..., head, ensemble, item, head_dim)
-            headed_key = headed_key.transpose(-2, -4) #(..., head, ensemble, item2, head_dim)
-            headed_value = headed_value.transpose(-2, -4) #(..., head, ensemble, item2, head_dim)
+        headed_query = headed_query.transpose(-2, -4)  # (..., head, ensemble, item, head_dim)
+        headed_key = headed_key.transpose(-2, -4)  # (..., head, ensemble, item2, head_dim)
+        headed_value = headed_value.transpose(-2, -4)  # (..., head, ensemble, item2, head_dim)
 
-            if mask is not None:
-                mask = mask.unsqueeze(-4)
+        if mask is not None:
+            mask = mask.unsqueeze(-4)
 
-            attn = _dot_product_attention(headed_query, headed_key, headed_value, mask) #(...,head, ensemble, item, head_dim)
-            attn = attn.transpose(-2, -4) #(..., item, ensemble, head, head_widht)
-            output = self.collapse_projector(attn) #(..., item, ensemble, embedding)
-            if self.ensembles is False:
-                output = output.squeeze(-2)
-            else:
-                output = output.transpose(-2, -3)
+        attn = _dot_product_attention(headed_query, headed_key, headed_value,
+                                      mask)  # (...,head, ensemble, item, head_dim)
+        attn = attn.transpose(-2, -4)  # (..., item, ensemble, head, head_widht)
+        output = self.collapse_projector(attn)  # (..., item, ensemble, embedding)
+        if self.ensembles is False:
+            output = output.squeeze(-2)
+        else:
+            output = output.transpose(-2, -3)
 
-            return output
+        return output
 
 
 class PIMU(nn.Module):
@@ -216,6 +217,7 @@ class PIMU(nn.Module):
     model down.
 
     """
+
     def __init__(self,
                  d_model: int,
                  mem_width: int,
@@ -230,7 +232,6 @@ class PIMU(nn.Module):
         :param ensembles: How many ensembles to set up. If none, dimension is disabled.
         """
         super().__init__()
-
 
         assert d_model % heads == 0
 
@@ -247,46 +248,44 @@ class PIMU(nn.Module):
         nn.init.kaiming_uniform_(key)
         nn.init.kaiming_uniform_(value)
 
-
         self.QueryProj = Linear(d_model, [heads, head_channel_width], ensembles)
         self.Key = nn.Parameter(key)
         self.Value = nn.Parameter(value)
         self.DeheadProj = Linear([heads, head_channel_width], d_model, ensembles)
 
-    def forward(self, query: torch.Tensor)-> torch.Tensor:
+    def forward(self, query: torch.Tensor) -> torch.Tensor:
         """
         :param query: A tensor to gain insight on
         :return: The calibrated result of the query.
         """
 
-
-        #query : (..., (ensemble), items, embedding_width)
+        # query : (..., (ensemble), items, embedding_width)
         if self.ensembles:
-            query = query.transpose(-2, -3) #(..., items, ensemble, embedding_width
+            query = query.transpose(-2, -3)  # (..., items, ensemble, embedding_width
 
+        # Get key, value, and query prepped
 
-        #Get key, value, and query prepped
-
-        query = self.QueryProj(query) #(..., items,  (ensemble), head,  head_embedding)
-        key = self.Key #((ensemble),  head, mem, head_embedding)
-        value = self.Value #(ensemble), head, mem, head_embedding)
+        query = self.QueryProj(query)  # (..., items,  (ensemble), head,  head_embedding)
+        key = self.Key  # ((ensemble),  head, mem, head_embedding)
+        value = self.Value  # (ensemble), head, mem, head_embedding)
 
         if self.ensembles:
-            query = query.transpose(-4, -2).transpose(-4, -3) #(..., ensemble, head, items, head_embed)
+            query = query.transpose(-4, -2).transpose(-4, -3)  # (..., ensemble, head, items, head_embed)
         else:
-            query = query.transpose(-3, -2) #(..., head, items, head_embed)
+            query = query.transpose(-3, -2)  # (..., head, items, head_embed)
 
-        #Perform scoring and attention
+        # Perform scoring and attention
 
-        attn = _dot_product_attention(query, key, value) #(..., (ensemble), head, items, head_embedding)
+        attn = _dot_product_attention(query, key, value)  # (..., (ensemble), head, items, head_embedding)
         if self.ensembles:
-            attn = attn.transpose(-2, -3).transpose(-3, -4) #(...,  items, ensemble, head, head_dim)
+            attn = attn.transpose(-2, -3).transpose(-3, -4)  # (...,  items, ensemble, head, head_dim)
         else:
-            attn = attn.transpose(-2, -3) #(..., items, head, head_dim)
-        output = self.DeheadProj(attn) #(... items, (ensemble), output_dim)
+            attn = attn.transpose(-2, -3)  # (..., items, head, head_dim)
+        output = self.DeheadProj(attn)  # (... items, (ensemble), output_dim)
         if self.ensembles:
-            output = output.transpose(-2, -3) #(..., ensemble, items, embed_dim)
+            output = output.transpose(-2, -3)  # (..., ensemble, items, embed_dim)
         return output
+
 
 class PISU(nn.Module):
     """
@@ -304,6 +303,7 @@ class PISU(nn.Module):
     Note that, as with PISU, an aggressive number of heads will
     allow more degrees of freedom, while fewer will allow less.
     """
+
     def __init__(self,
                  d_model: int,
                  d_output: int,
@@ -322,8 +322,7 @@ class PISU(nn.Module):
 
         super().__init__()
         assert d_model % heads == 0
-        head_width = d_model//heads
-
+        head_width = d_model // heads
 
         if ensembles is None:
             ensembles = 1
@@ -338,6 +337,7 @@ class PISU(nn.Module):
         self.key_projector = Linear(d_model, [heads, head_width], ensembles)
         self.value_projector = Linear(d_model, [heads, head_width], ensembles)
         self.dehead = Linear([heads, head_width], d_output, ensembles)
+
     def forward(self, content: torch.Tensor) -> torch.Tensor:
         """
 
@@ -345,28 +345,29 @@ class PISU(nn.Module):
         :param content: (..., (ensembles), items, embeddings)
         :return:
         """
-        #content: (..., (ensembles), items, embeddings)
-        #Project
+        # content: (..., (ensembles), items, embeddings)
+        # Project
 
         if self.ensembles is False:
-            content = content.unsqueeze(-3) #(..., ensembles, items, embedding)
+            content = content.unsqueeze(-3)  # (..., ensembles, items, embedding)
 
-        content = content.transpose(-3, -2) #(..., items, ensembles, embedding)
+        content = content.transpose(-3, -2)  # (..., items, ensembles, embedding)
 
-        query = self.query #(ensemble, head, output_items, head_embed)
-        key = self.key_projector(content).transpose(-4, -2).transpose(-4, -3) #(...., ensemble, head, items, head_embedding)
-        value = self.value_projector(content).transpose(-4, -2).transpose(-4, -3) #(...., ensemble, head, items, head_embedding)
+        query = self.query  # (ensemble, head, output_items, head_embed)
+        key = self.key_projector(content).transpose(-4, -2).transpose(-4,
+                                                                      -3)  # (...., ensemble, head, items, head_embedding)
+        value = self.value_projector(content).transpose(-4, -2).transpose(-4,
+                                                                          -3)  # (...., ensemble, head, items, head_embedding)
 
-        attn = _dot_product_attention(query, key, value) #(..., ensemble, head, output_items, head_embed)
-        attn = attn.transpose(-4, -2).transpose(-3, -2) #(..., output_items, ensemble, head, head_embed)
-        output = self.dehead(attn) #(..., output_items, ensemble, embedding)
-        output = output.transpose(-3, -2) #(..., ensemble, output_items, embedding)
+        attn = _dot_product_attention(query, key, value)  # (..., ensemble, head, output_items, head_embed)
+        attn = attn.transpose(-4, -2).transpose(-3, -2)  # (..., output_items, ensemble, head, head_embed)
+        output = self.dehead(attn)  # (..., output_items, ensemble, embedding)
+        output = output.transpose(-3, -2)  # (..., ensemble, output_items, embedding)
 
         if self.ensembles is False:
             output = output.squeeze(-3)
 
         return output
-
 
 
 class LCSA(nn.Module):
@@ -391,6 +392,7 @@ class LCSA(nn.Module):
     Combined with add+norm, this nicely handles local context.
 
     """
+
     def __init__(self,
                  d_model: int,
                  kernel_width: int,
@@ -412,7 +414,7 @@ class LCSA(nn.Module):
         heads = len(dilations)
 
         assert d_model % heads == 0, "Dilations not compatible with d_model"
-        head_width = d_model//heads
+        head_width = d_model // heads
 
         if ensemble is None:
             ensemble = 1
@@ -437,46 +439,50 @@ class LCSA(nn.Module):
         :return: A tensor. The result of self attention. Shape (..., (ensemble), item, embedding)
         :raise RuntimeError: If the number of items is too small for the kernel.
         """
-        #Tensor: (..., (ensemble), items, embedding)
+        # Tensor: (..., (ensemble), items, embedding)
 
-        #Ensure ensemble
+        # Ensure ensemble
         if self.ensemble is False:
-            tensor = tensor.unsqueeze(-3) #(..., ensemble, items, embedding
+            tensor = tensor.unsqueeze(-3)  # (..., ensemble, items, embedding
         if self.kernel_width > tensor.shape[-2]:
             raise RuntimeError("Kernel requires items dim to be length %s, but received tensor of length %s" %
                                (self.kernel_width, tensor.shape[-2]))
 
-        tensor = tensor.transpose(-2, -1) #(..., ensemble, embedding, items)
+        tensor = tensor.transpose(-2, -1)  # (..., ensemble, embedding, items)
 
-        #Localize
-        query = Glimpses.dilocal(tensor, 1, 1, self.dilations) #(..., ensemble, embedding, head, items, 1 (local))
-        content = Glimpses.dilocal(tensor, self.kernel_width, 1, self.dilations, pad_justification=self.mode) #(... ensemble, embedding, head, items, `local`)
+        # Localize
+        query = Glimpses.dilocal(tensor, 1, 1, self.dilations)  # (..., ensemble, embedding, head, items, 1 (local))
+        content = Glimpses.dilocal(tensor, self.kernel_width, 1, self.dilations,
+                                   pad_justification=self.mode)  # (... ensemble, embedding, head, items, `local`)
 
-        #Project and setup attention, taking care to process each
-        #ensemble independently.
+        # Project and setup attention, taking care to process each
+        # ensemble independently.
 
-        #(..., ensemble, embedding, head, items, local)
-        #(...ensemble, local,  head, items, embedding)
-        #(...ensemble, items, head, local, embedding)
-        #(...items, ensemble, head, local, embedding)
-        query = query.transpose(-4, -1).transpose(-4, -2).transpose(-5, -4) #(..., items. ensemble, head, 1, embedding)
-        content = content.transpose(-4, -1).transpose(-4, -2).transpose(-5, -4) #(..., items. ensemble, head, local, embedding)
+        # (..., ensemble, embedding, head, items, local)
+        # (...ensemble, local,  head, items, embedding)
+        # (...ensemble, items, head, local, embedding)
+        # (...items, ensemble, head, local, embedding)
+        query = query.transpose(-4, -1).transpose(-4, -2).transpose(-5,
+                                                                    -4)  # (..., items. ensemble, head, 1, embedding)
+        content = content.transpose(-4, -1).transpose(-4, -2).transpose(-5,
+                                                                        -4)  # (..., items. ensemble, head, local, embedding)
 
-        query = self.query_projector(query) #(..., items. ensemble, head, 1, head_embed)
-        key = self.key_projector(content) #(.., items. ensemble, head, local, head_embed)
-        value = self.value_projector(content) #(..., items. ensemble, head, local, head_embed)
+        query = self.query_projector(query)  # (..., items. ensemble, head, 1, head_embed)
+        key = self.key_projector(content)  # (.., items. ensemble, head, local, head_embed)
+        value = self.value_projector(content)  # (..., items. ensemble, head, local, head_embed)
 
-        #Perform attention
+        # Perform attention
 
-        attn = _dot_product_attention(query, key, value) #(..., items, ensemble, head, 1, head_embed)
-        attn = attn.squeeze(-2) #(..., items, ensemble, head, head_embedding)
+        attn = _dot_product_attention(query, key, value)  # (..., items, ensemble, head, 1, head_embed)
+        attn = attn.squeeze(-2)  # (..., items, ensemble, head, head_embedding)
 
-        #Remove head and return
-        outcome = self.dehead(attn) #(..., items, ensemble, embedding
-        outcome = outcome.transpose(-3, -2) #(..., ensemble, items, embedding)
+        # Remove head and return
+        outcome = self.dehead(attn)  # (..., items, ensemble, embedding
+        outcome = outcome.transpose(-3, -2)  # (..., ensemble, items, embedding)
         if self.ensemble is False:
             outcome = outcome.squeeze(-3)
         return outcome
+
 
 class EESA(nn.Module):
     """
@@ -495,6 +501,7 @@ class EESA(nn.Module):
     speed as well.
 
     """
+
     def __init__(self,
                  d_model: int,
                  heads: int,
@@ -521,10 +528,10 @@ class EESA(nn.Module):
         :param tensor: A tensor. Of shape (..., ensemble, items, embedding)
         :return: Another tensor. Shape (..., ensemble, items, embedding)
         """
-        #tensor: (..., ensemble, items, embedding)
-        tensor = tensor.transpose(-2, -3) #(..., items, ensembe, embedding)
-        tensor = self.Attn(tensor, tensor, tensor, self.mask) #(..., items, ensemble, embedding)
-        tensor = tensor.transpose(-2, -3) #(..., ensemble, items, embedding)
+        # tensor: (..., ensemble, items, embedding)
+        tensor = tensor.transpose(-2, -3)  # (..., items, ensembe, embedding)
+        tensor = self.Attn(tensor, tensor, tensor, self.mask)  # (..., items, ensemble, embedding)
+        tensor = tensor.transpose(-2, -3)  # (..., ensemble, items, embedding)
         return tensor
 
 
@@ -538,8 +545,10 @@ class GSPU(nn.Module):
     tensor for each individual word. Combined with
     add+norm, it takes care of global context.
     """
+
     def _straightthrough(self, tensor: torch.tensor):
         return tensor
+
     def __init__(self,
                  d_model: int,
                  d_summary: int,
@@ -576,7 +585,6 @@ class GSPU(nn.Module):
         if layers is None:
             layers = []
 
-
         self.Dropout = nn.Dropout(dropout)
         self.PISU = PISU(d_model, d_summary, summary_width, pisu_heads, ensembles)
         self.PISU_Norm = nn.LayerNorm(d_summary)
@@ -584,17 +592,16 @@ class GSPU(nn.Module):
         self.Norms = nn.ModuleList([nn.LayerNorm(d_summary) for _ in layers])
         self.Localize = MultiHeadedAttention(d_model, d_summary, d_model, mha_heads, ensembles)
 
-
-    def forward(self, tensor: torch.Tensor)-> torch.Tensor:
+    def forward(self, tensor: torch.Tensor) -> torch.Tensor:
         """
 
         :param tensor: A tensor, of shape (..., (ensemble), items, embedding)
         :return:  A tensor, of shape (..., (ensemble), items, embedding)
         """
 
-        #tensor: (..., (ensemble), items, normal_embedding)
+        # tensor: (..., (ensemble), items, normal_embedding)
         if self.ensembles is False:
-            tensor = tensor.unsqueeze(-3) #(..., ensemble, items, normal_embedding)
+            tensor = tensor.unsqueeze(-3)  # (..., ensemble, items, normal_embedding)
 
         summary = self.PISU(tensor)
         summary = self.PISU_Norm(summary)
@@ -608,5 +615,3 @@ class GSPU(nn.Module):
         if self.ensembles is False:
             output = output.squeeze(-3)
         return output
-
-

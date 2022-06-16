@@ -2,6 +2,7 @@ import torch
 from torch import nn
 from torch.nn import functional as F
 
+
 class CrossEntropyEnsembleBoost(nn.Module):
     """
     Cross entropy with a bit of a twist
@@ -16,8 +17,9 @@ class CrossEntropyEnsembleBoost(nn.Module):
     all the intermediate losses.
 
     """
+
     def __init__(self,
-                 ensemble_channel: int=-3,
+                 ensemble_channel: int = -3,
                  label_smoothing: float = 0.0,
                  boost_smoothing: float = 0.2
                  ):
@@ -33,16 +35,17 @@ class CrossEntropyEnsembleBoost(nn.Module):
             labels = F.one_hot(labels, self.logit_width).type(torch.float32)
         labels = (1 - self.smoothing) * labels + self.smoothing / self.logit_width
 
-        #Unbind the ensemble channel, then prep loss and weights for accumulatin
+        # Unbind the ensemble channel, then prep loss and weights for accumulatin
         logits = predictions.unbind(self.channel)
         weights = torch.ones_like(predictions[0])
         loss = torch.tensor([0.0], dtype=predictions.dtype)
         for logit in logits:
-            entropy = - labels*torch.log_softmax(logit, dim=-1)
-            weighted_entropy = weights*entropy
-            loss = loss + weighted_entropy.sum()/logit.shape[-1]
-            weights = weighted_entropy*(1-self.boost) + self.boost
+            entropy = - labels * torch.log_softmax(logit, dim=-1)
+            weighted_entropy = weights * entropy
+            loss = loss + weighted_entropy.sum() / logit.shape[-1]
+            weights = weighted_entropy * (1 - self.boost) + self.boost
         return loss
+
 
 class CrossEntropyAdditiveBoost(nn.Module):
     """
@@ -61,6 +64,7 @@ class CrossEntropyAdditiveBoost(nn.Module):
     minimize further loss.
 
     """
+
     def __init__(self,
                  logit_width: int,
                  ensemble_channel: int = 1,
@@ -76,26 +80,25 @@ class CrossEntropyAdditiveBoost(nn.Module):
 
     def forward(self, data: torch.Tensor, labels: torch.Tensor):
 
-        #Prep and smooth labels.
+        # Prep and smooth labels.
         if labels.dtype == torch.int32 or labels.dtype == torch.int64 or labels.dtype == torch.int16:
             labels = F.one_hot(labels, self.logit_width).type(torch.float32)
-        labels = (1-self.smoothing)*labels + self.smoothing/self.logit_width
+        labels = (1 - self.smoothing) * labels + self.smoothing / self.logit_width
 
-        #Prep various channels
+        # Prep various channels
         channels = data.unbind(dim=self.channel)
         weights = torch.ones_like(channels[0])
         logits = torch.zeros_like(channels[0])
         loss = torch.tensor([0.0], dtype=data.dtype)
 
-        #Run
+        # Run
         for channel in channels:
-
-            #Update loss
+            # Update loss
             logits = logits + channel
             entropy = - labels * torch.log_softmax(logits, dim=-1)
-            weighted_entropy = entropy*weights
-            loss = loss + weighted_entropy.sum()/self.logit_width
+            weighted_entropy = entropy * weights
+            loss = loss + weighted_entropy.sum() / self.logit_width
 
-            #Update and smooth weights.
-            weights = entropy*(1-self.boost) + self.boost
+            # Update and smooth weights.
+            weights = entropy * (1 - self.boost) + self.boost
         return loss

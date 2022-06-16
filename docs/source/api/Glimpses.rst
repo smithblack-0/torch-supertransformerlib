@@ -3,7 +3,7 @@ Glimpses
 
 Documentation for the glimpses kernel library
 
-.. automodule:: Glimpses
+.. automodule:: supertransformerlib.Glimpses
 
 view
 ----

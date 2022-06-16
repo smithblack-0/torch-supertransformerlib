@@ -7,7 +7,6 @@ import math
 from torch import nn
 from torch.nn import functional as F
 
-
 # perform library imports
 from . import Glimpses
 from .Linear import Linear
@@ -74,10 +73,13 @@ class BandedMultiheadedAttention(nn.Module):
 
     def minimum_query_length(self):
         return self.query_kernel
+
     def minimum_value_length(self):
         return self.content_kernel
+
     def minimum_key_length(self):
         return self.content_kernel
+
     def __init__(self,
                  d_model: int,
                  kernel_width: int,
@@ -100,10 +102,10 @@ class BandedMultiheadedAttention(nn.Module):
         :param trim: Whether to trim off the extra padding if we did end up padding the input
         """
 
-        #Start torch
+        # Start torch
         super().__init__()
 
-        #Defaults
+        # Defaults
 
         if supersampling is None:
             supersampling = [5, 5, 2, 1, 1]
@@ -116,31 +118,31 @@ class BandedMultiheadedAttention(nn.Module):
         if trim is None:
             trim = False
 
-        #Simplify the ratio down to it's smallest terms, and setup the kernel sizes
+        # Simplify the ratio down to it's smallest terms, and setup the kernel sizes
 
         assert isinstance(kernel_width, int)
         assert kernel_width >= 1
         assert isinstance(compression_ratio, (list, tuple))
         assert isinstance(compression_ratio[0], int)
         assert isinstance(compression_ratio[1], int)
-        assert compression_ratio[0] >=1
-        assert compression_ratio[1] >=1
+        assert compression_ratio[0] >= 1
+        assert compression_ratio[1] >= 1
 
         query_width = torch.tensor([1], dtype=torch.int64)
         kernel_width = torch.tensor(kernel_width, dtype=torch.int64)
 
         query_kernel_multiplier, content_kernel_multiplier = compression_ratio
         gcd = math.gcd(query_kernel_multiplier, content_kernel_multiplier)
-        query_kernel_multiplier = query_kernel_multiplier//gcd
+        query_kernel_multiplier = query_kernel_multiplier // gcd
         content_kernel_multiplier = content_kernel_multiplier // gcd
 
-        query_kernel = query_width*query_kernel_multiplier
-        content_kernel = kernel_width*content_kernel_multiplier
+        query_kernel = query_width * query_kernel_multiplier
+        content_kernel = kernel_width * content_kernel_multiplier
 
         query_step = torch.tensor(query_kernel_multiplier, dtype=torch.int64)
         content_step = torch.tensor(content_kernel_multiplier, dtype=torch.int64)
 
-        #Verify the dilation rates, sampling rates, and setup the dilation headspace
+        # Verify the dilation rates, sampling rates, and setup the dilation headspace
 
         assert isinstance(dilation_rates, (list, tuple))
         assert isinstance(supersampling, list)
@@ -155,16 +157,15 @@ class BandedMultiheadedAttention(nn.Module):
         supersampling = torch.tensor(supersampling, dtype=torch.int64)
         dilation_rates = torch.tensor(dilation_rates, dtype=torch.int64)
 
-        #Create projection parameters, and projectors
+        # Create projection parameters, and projectors
 
         assert isinstance(d_model, int)
         assert d_model > 0
 
-
         subheads = dilation_rates.shape[0]
         heads = supersampling.sum()
         if d_internal is None:
-            d_internal = d_model//subheads
+            d_internal = d_model // subheads
 
         Query_Projector = Linear(d_model, d_internal, subheads)
         Key_Projector = Linear(d_model, d_internal, subheads)
@@ -172,7 +173,7 @@ class BandedMultiheadedAttention(nn.Module):
         Collapse_Projector = Linear([heads, d_internal], d_model)
         Pos_Sampling = Linear([query_kernel, content_kernel], [query_kernel, content_kernel], heads)
 
-        #Store
+        # Store
 
         self.dilation = dilation_rates
         self.sampling = supersampling
@@ -198,6 +199,7 @@ class BandedMultiheadedAttention(nn.Module):
         self._Value = Value_Projector
         self._Sampler = Pos_Sampling
         self._Collapse = Collapse_Projector
+
     def pad(self,
             query: torch.Tensor,
             key: torch.Tensor,
@@ -215,7 +217,6 @@ class BandedMultiheadedAttention(nn.Module):
         :return: padded_query, padded_key, padded_value
         """
 
-
         if query.shape[-2] < self.query_kernel:
             difference = int(self.query_kernel - query.shape[-2])
             query = F.pad(query, [0, 0, 0, difference], value=fill)
@@ -231,6 +232,7 @@ class BandedMultiheadedAttention(nn.Module):
             key = F.pad(key, [0, 0, 0, difference], value=fill)
             value = F.pad(value, [0, 0, 0, difference], value=fill)
         return query, key, value
+
     def forward(self,
                 query: torch.Tensor,
                 key: torch.Tensor,
@@ -263,54 +265,58 @@ class BandedMultiheadedAttention(nn.Module):
                 raise ValueError("Item dimension of query is smaller then query kernel")
             if value.shape[-2] < self.content_kernel:
                 raise ValueError("Item dimension of value is smaller then content kernel")
-            if query.shape[-2]*self.compression[1] != value.shape[-2]*self.compression[0]:
+            if query.shape[-2] * self.compression[1] != value.shape[-2] * self.compression[0]:
                 raise ValueError("Query and content lengths were not provided in the correct ratio")
 
             revised_query = query
             revised_key = key
             revised_value = value
 
-        #Localize all entries, and create the dilation heads.
-        revised_query = revised_query.transpose(-1, -2) #(..., d_model, items)
+        # Localize all entries, and create the dilation heads.
+        revised_query = revised_query.transpose(-1, -2)  # (..., d_model, items)
         revised_key = revised_key.transpose(-1, -2)
         revised_value = revised_value.transpose(-1, -2)
 
-        local_queries = Glimpses.dilocal(revised_query, self.query_kernel.item(), self.query_stride.item(), self.dilation) #(batch, d_model, head, same_item, query_local)
-        local_keys = Glimpses.dilocal(revised_key, self.content_kernel.item(), self.content_stride.item(), self.dilation)#(batch, d_model, head, same_item, local)
-        local_values = Glimpses.dilocal(revised_value, self.content_kernel.item(), self.content_stride.item(), self.dilation) #(batch, d_model, head, same_item, local)
+        local_queries = Glimpses.dilocal(revised_query, self.query_kernel.item(), self.query_stride.item(),
+                                         self.dilation)  # (batch, d_model, head, same_item, query_local)
+        local_keys = Glimpses.dilocal(revised_key, self.content_kernel.item(), self.content_stride.item(),
+                                      self.dilation)  # (batch, d_model, head, same_item, local)
+        local_values = Glimpses.dilocal(revised_value, self.content_kernel.item(), self.content_stride.item(),
+                                        self.dilation)  # (batch, d_model, head, same_item, local)
         local_values = torch.repeat_interleave(local_values, self.sampling, dim=-3)
 
-        #Perform the heading interprojections for scoring
+        # Perform the heading interprojections for scoring
 
-        local_queries = local_queries.transpose(-3, -2).transpose(-4, -1) #(batch, query_local, item, head, d_model)
-        local_keys = local_keys.transpose(-3, -2).transpose(-4, -1) #(batch, local, item, head, d_model)
-        local_values = local_values.transpose(-3, -2).transpose(-4, -1) #(..., item, head, local, d_model)
+        local_queries = local_queries.transpose(-3, -2).transpose(-4, -1)  # (batch, query_local, item, head, d_model)
+        local_keys = local_keys.transpose(-3, -2).transpose(-4, -1)  # (batch, local, item, head, d_model)
+        local_values = local_values.transpose(-3, -2).transpose(-4, -1)  # (..., item, head, local, d_model)
 
-        local_queries = self._Query(local_queries) #(batch, query_local, item, head, d_small)
+        local_queries = self._Query(local_queries)  # (batch, query_local, item, head, d_small)
         local_keys = self._Key(local_keys)
         local_values = self._Value(local_values)
 
-        #Perform attention on the local axis.
+        # Perform attention on the local axis.
 
-        local_queries = local_queries.transpose(-4, -2).transpose(-4, -3) #(batch, item, head, query_local, d_small)
-        local_keys = local_keys.transpose(-4, -2).transpose(-4, -3) #(batch, item,  head, local, d_small)
+        local_queries = local_queries.transpose(-4, -2).transpose(-4, -3)  # (batch, item, head, query_local, d_small)
+        local_keys = local_keys.transpose(-4, -2).transpose(-4, -3)  # (batch, item,  head, local, d_small)
         local_values = local_values.transpose(-4, -2).transpose(-4, -3)
 
-        score = torch.matmul(local_queries, local_keys.transpose(-1, -2)) #(batch, item, head, query_local, local)
-        score = torch.repeat_interleave(score, self.sampling, dim=-3) #Expand for supersampling
-        score = self._Sampler(score) #Perform supersampling. Knowledge of relative order injected.
+        score = torch.matmul(local_queries, local_keys.transpose(-1, -2))  # (batch, item, head, query_local, local)
+        score = torch.repeat_interleave(score, self.sampling, dim=-3)  # Expand for supersampling
+        score = self._Sampler(score)  # Perform supersampling. Knowledge of relative order injected.
         score = torch.softmax(score, dim=-1)
 
-        attention = torch.matmul(score, local_values) #(batch, item, head, query_local, d_small)
+        attention = torch.matmul(score, local_values)  # (batch, item, head, query_local, d_small)
 
-        #Delocalize, combine, trim and return
+        # Delocalize, combine, trim and return
 
-        attention = attention.transpose(-4, -3).flatten(-3, -2) #(batch, head, item, d_small)
-        attention = attention.transpose(-3, -2) #(batch, item, head, d_small)
-        final_result = self._Collapse(attention) #(batch, item, d_model)
+        attention = attention.transpose(-4, -3).flatten(-3, -2)  # (batch, head, item, d_small)
+        attention = attention.transpose(-3, -2)  # (batch, item, head, d_small)
+        final_result = self._Collapse(attention)  # (batch, item, d_model)
         if self.trim and final_result.shape[-2] > query.shape[-2]:
             final_result = final_result[..., :query.shape[-2], :]
         return final_result
+
 
 class FeedForward(nn.Module):
     """
@@ -325,19 +331,10 @@ class FeedForward(nn.Module):
         self._ff2 = Linear(dim_feedforward, d_model)
         self._dropout = nn.Dropout(dropout)
         self._activation = torch.relu
+
     def forward(self, tensor):
         tensor = self._ff1(tensor)
         tensor = self._activation(tensor)
         tensor = self._dropout(tensor)
         tensor = self._ff2(tensor)
         return tensor
-
-
-
-
-
-
-
-
-
-
