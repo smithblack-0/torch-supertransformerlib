@@ -13,7 +13,7 @@ build:
 
 # Set to sphinx:
 sphinx:
-  fail_on_warning: false
+  fail_on_warning: true
 
 # Optionally declare the Python requirements required to build your docs
 python:
