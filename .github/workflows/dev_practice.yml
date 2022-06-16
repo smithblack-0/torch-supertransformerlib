@@ -18,8 +18,8 @@ jobs:
         python-version: '3.8'
     - name: ls
       run: ls 
-    - name: dir
-      run: dir
+    - name: cd
+      run: cd /tests
   test-windows:
     runs-on: windows-latest
     steps:
@@ -27,8 +27,8 @@ jobs:
     - uses: actions/setup-python@v3
       with:
         python-version: '3.8'
-    - name: windows_test
+    - name: ls
       run: ls
-    - name: windows_dir
-      run: dir
+    - name: cd 
+      run: cd /tests
   
