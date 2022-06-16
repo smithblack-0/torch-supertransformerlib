@@ -48,7 +48,7 @@ jobs:
       - name: Install Python dependencies
         uses: py-actions/py-dependency-install@v3
         with:
-          path: test/requirements.txt
+          path: test\requirements.txt
           
       - name: Test with pytest
         run: |
