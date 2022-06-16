@@ -67,6 +67,9 @@ class FeedForward(nn.Module):
         self.ff2 = Linear(d_internal, d_model, ensembles)
 
     def forward(self, tensor: torch.Tensor):
+        """
+        Simply expects a tensor.
+        """
         #tensor: (..., (ensembles), items, embedding)
         if self.ensembles is False:
             tensor = tensor.unsqueeze(-3) #(..., ensemble, items, embedding)

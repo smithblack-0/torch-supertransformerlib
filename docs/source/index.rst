@@ -11,6 +11,7 @@ Welcome to supertransformerlib's documentation!
 
    README.md
    license.md
+   api
 
 What is this?
 =============
