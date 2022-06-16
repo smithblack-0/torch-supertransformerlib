@@ -5,7 +5,7 @@
 The library is broken up into several components. From import, you have
 the Attention, the Local, the Glimpses, and the Loss library.
 
-### Attention
+## Attention
 
 The attention library contains the majority of the interesting components.
 The items here are layers which impliment a variety of attention and feedforward
@@ -59,13 +59,13 @@ relations between entities.
 * GSPU: Use this, with an internal transformer stack, when the model really
 needs to be able to reason about the big picture.
 
-### Linear
+## Linear
 
 Linear is a core layer, and a rebuild of torch's
 linear layer in an ensemble capable format. See the 
 class for details
 
-### Glimpses
+## Glimpses
 
 The Glimpses package contains a few functions which
 are useful for dealing with local operations and reshaping.
@@ -74,7 +74,7 @@ In particular, Glimpses contains an operation called "local"
 which is capable of returning a view of a tensor which is 
 exactly the same as would be seen from a convolution kernel.
 
-### Loss
+## Loss
 
 Loss contains some experimental loss functions which may
 be useful on an ensemble of outputs.
