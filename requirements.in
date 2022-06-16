@@ -1,4 +1,5 @@
 # requirements.in
 mkdocs
 setuptools
+myst-parser
 torch
