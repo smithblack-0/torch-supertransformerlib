@@ -4,7 +4,7 @@ A library for fast, smart transformers.
 
 """
 
-__version__ = "1.0r6"
+__version__ = "1.0r7"
 
 from . import Glimpses # noqa
 from . import Attention # noqa
