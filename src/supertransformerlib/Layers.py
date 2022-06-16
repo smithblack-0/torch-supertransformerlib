@@ -10,7 +10,7 @@ from torch.nn import functional as F
 
 # perform library imports
 from . import Glimpses
-from . import Linear
+from .Linear import Linear
 
 
 class BandedMultiheadedAttention(nn.Module):

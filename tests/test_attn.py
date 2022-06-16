@@ -226,32 +226,6 @@ class test_LCSA(unittest.TestCase):
         self.assertTrue(shape_equal([3, 5, 10, 32], local_conditioning.shape))
 
 
-class test_GLSA(unittest.TestCase):
-    """
-
-    The test fixture for GSLA.
-
-    """
-    def test_basic(self):
-        """ Test whether GLSA works at all"""
-        query = torch.randn([3, 5, 10, 32])
-        layer = Attention.GLSA(32, 64, 10, 8)
-        glsa = layer(query)
-        self.assertTrue(shape_equal(glsa.shape, [3, 5, 10, 32]))
-    def test_ensemble(self):
-        """ Test whether the ensemble system works properly"""
-        query = torch.randn([3, 5, 10, 32])
-        layer = Attention.GLSA(32, 64, 10, 8, 5)
-        glsa = layer(query)
-        self.assertTrue(shape_equal(glsa.shape, [3, 5, 10, 32]))
-    def test_torchscript(self):
-        """ Test whether torchscript compiles properly"""
-        query = torch.randn([3, 5, 10, 32])
-        layer = Attention.GLSA(32, 64, 10, 8, 5)
-        layer = torch.jit.script(layer)
-        glsa = layer(query)
-        self.assertTrue(shape_equal(glsa.shape, [3, 5, 10, 32]))
-
 class test_GSPU(unittest.TestCase):
     """
     Test fixture for the Global Strategic Processing Unit.

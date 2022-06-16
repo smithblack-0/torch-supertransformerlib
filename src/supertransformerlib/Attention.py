@@ -3,7 +3,7 @@ from typing import Optional, List
 import torch
 from torch import nn
 
-from . import Linear
+from .Linear import Linear
 from . import Glimpses
 
 
