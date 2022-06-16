@@ -4,8 +4,8 @@ import torch
 from torch import nn
 from torch.nn import functional as F
 
-from src.supertransformerlib.Linear import Linear
-from src.supertransformerlib import Glimpses
+from . import Linear
+from . import Glimpses
 
 
 def _dot_product_attention(
