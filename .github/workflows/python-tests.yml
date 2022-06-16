@@ -19,7 +19,7 @@ jobs:
       with:
         python-version: '3.8'
     - name: debug echo
-      run: echo dir
+      run: echo ls
     - name: setupenv
       run: |
         python -m pip install --upgrade pip
