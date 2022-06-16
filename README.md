@@ -1,5 +1,4 @@
-[![Python tests](https://github.com/smithblack-0/torch-supertransformerlib/actions/workflows/python-tests.yml/badge.svg?event=push)](https://github.com/smithblack-0/torch-supertransformerlib/actions/workflows/python-tests.yml)
-
+[![Python test then publish](https://github.com/smithblack-0/torch-supertransformerlib/actions/workflows/python-test-publish.yml/badge.svg?branch=master)](https://github.com/smithblack-0/torch-supertransformerlib/actions/workflows/python-test-publish.yml)
 
 
 # What is this?
