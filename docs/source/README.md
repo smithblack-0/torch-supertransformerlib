@@ -2,8 +2,8 @@
 
 ## How do I use this?
 
-The library is broken up into several components. These are listed
-as follows.
+The library is broken up into several components. From import, you have
+the Attention, the Local, the Glimpses, and the Loss library.
 
 ### Attention
 
