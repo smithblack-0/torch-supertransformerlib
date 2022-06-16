@@ -45,8 +45,9 @@ By providing a large number of parameters and ensembles,
 one can create a transformer with many, many ways of looking at
 the same few tensors to increase accuracy.
 
-For exchanging information between the layers, the
-:ref:`EESA <EESA>` layer exists
+For exchanging information between the ensembles, the
+:ref:`EESA <EESA>` layer exists. Also, certain ensemble
+capable loss functions also are present.
 
 Context Splitting
 -----------------

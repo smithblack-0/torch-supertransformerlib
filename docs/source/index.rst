@@ -10,7 +10,7 @@ Welcome to supertransformerlib's documentation!
    :maxdepth: 2
 
    concepts
-   README.md
+   howtouse.md
    api/api
    license.md
 
