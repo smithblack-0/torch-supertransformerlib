@@ -15,7 +15,7 @@ classifiers = [
     "transformer",
     "transformers"
 ]
-dependencies = ["torch >= 1.11"]
+dependencies = ["torch >= 1.11", "numpy"]
 dynamic = ["version", "description"]
 
 [project.optional-dependencies]

@@ -31,6 +31,7 @@ def view(tensor,
     :param output_shape:
         The expected output shape. This can be a list/tuple of ints, or an int. It should represent the final shape one
         wishes the tensor to take. It also must be the case that the total size of the input and output shape must be the same.
+
     ---- Examples ----
 
 

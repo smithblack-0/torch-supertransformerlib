@@ -2,10 +2,9 @@ from typing import Optional, List
 
 import torch
 from torch import nn
-from torch.nn import functional as F
 
-from . import Linear
-from . import Glimpses
+from src.supertransformerlib import Linear
+from src.supertransformerlib import Glimpses
 
 
 def _dot_product_attention(
