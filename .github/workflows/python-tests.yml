@@ -18,6 +18,8 @@ jobs:
     - uses: actions/setup-python@v3
       with:
         python-version: '3.8'
+    - name: debug echo
+      run: echo dir
     - name: setupenv
       run: |
         python -m pip install --upgrade pip
