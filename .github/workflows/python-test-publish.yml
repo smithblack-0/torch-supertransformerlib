@@ -55,7 +55,6 @@ jobs:
 
   publish:
     needs: [linter, tests]
-    if: github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags')
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v3
@@ -75,14 +74,15 @@ jobs:
         --sdist
         --wheel
         --outdir dist/
-        .
     - name: Publish distribution to Test PyPI
       uses: pypa/gh-action-pypi-publish@master
       with:
-        password: ${{ secrets.TESTPYPIAPITOKEN }}
+        username: __token__
+        password: ${{ secrets.PYPITESTTOKEN }}
         repository_url: https://test.pypi.org/legacy/
     - name: Publish distribution to PyPI
       if: startsWith(github.ref, 'refs/tags')
       uses: pypa/gh-action-pypi-publish@master
       with:
-        password: ${{ secrets.PYPI_API_TOKEN }}
+        username: __token__
+        password: ${{ secrets.PYPITOKEN }}
