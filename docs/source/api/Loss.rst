@@ -3,7 +3,7 @@ Loss
 
 Ensemble enabled loss functions
 
-.. automodule:: Loss
+.. automodule:: supertransformerlib.Loss
 
 
 CrossEntropyEnsembleBoost

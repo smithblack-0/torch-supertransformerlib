@@ -1,6 +1,6 @@
 Linear
 ======
 
-.. automodule:: Linear
+.. automodule:: supertransformerlib.Linear
 
 .. autoclass:: Linear

@@ -1,7 +1,7 @@
 Attention
 =========
 
-.. automodule:: Attention
+.. automodule:: supertransformerlib.Attention
 
 Standard
 --------
