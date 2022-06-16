@@ -15,12 +15,12 @@ keywords = [
     "transformer",
     "transformers"
 ]
-dependencies = ["torch >= 1.11", "numpy"]
+dependencies = ["torch >= 1.11", "=>"]
 dynamic = ["version", "description"]
 requires_python = ">=3.8"
 
 [project.optional-dependencies]
-doc = ["sphinx", "myst-parser"]
+doc = ["pytest"]
 
 [project.urls]
 Documentation = "https://torch-supertransformerlib.readthedocs.io/en/latest/"
