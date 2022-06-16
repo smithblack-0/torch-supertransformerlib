@@ -18,8 +18,8 @@ jobs:
         python-version: '3.8'
     - name: ls
       run: ls 
-    - name: cd
-      run: cd /tests
+    - name: sub
+      run: ls tests
   test-windows:
     runs-on: windows-latest
     steps:
@@ -29,6 +29,6 @@ jobs:
         python-version: '3.8'
     - name: ls
       run: ls
-    - name: cd 
-      run: cd /tests
+    - name: sub 
+      run: ls tests
   
