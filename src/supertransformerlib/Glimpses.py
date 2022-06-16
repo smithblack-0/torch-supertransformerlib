@@ -7,6 +7,7 @@ All items within this module are functions. They all accept a tensor and paramet
 do something with it. They also tend to return views to allow efficient memory utilization.
 
 """
+
 import torch
 from torch import nn
 from torch.nn import functional as F
@@ -97,6 +98,7 @@ def reshape(tensor,
     :param output_shape:
         The expected output shape. This can be a list/tuple of ints, or an int. It should represent the final shape one
         wishes the tensor to take. It also must be the case that the total size of the input and output shape must be the same.
+
     ---- Examples ----
 
 
