@@ -1,3 +1,7 @@
+[![Python tests](https://github.com/smithblack-0/torch-supertransformerlib/actions/workflows/python-tests.yml/badge.svg?event=push)](https://github.com/smithblack-0/torch-supertransformerlib/actions/workflows/python-tests.yml)
+
+
+
 # What is this?
 
 This is a collection of layers designed to achieve state-of-the-art results in the field of natural language processing.
