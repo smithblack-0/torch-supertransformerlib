@@ -9,8 +9,8 @@ from torch.nn import functional as F
 
 
 # perform library imports
-from src.supertransformerlib import Glimpses
-from src.supertransformerlib import Linear
+from . import Glimpses
+from . import Linear
 
 
 class BandedMultiheadedAttention(nn.Module):

@@ -7,10 +7,10 @@ A library for fast, smart transformers.
 
 
 
-__version__ = "1.0r3"
+__version__ = "1.0r5"
 
-from src.supertransformerlib import Glimpses
-from src.supertransformerlib import Attention
-from src.supertransformerlib import Linear
-from src.supertransformerlib import Loss
+from . import Glimpses
+from . import Attention
+from . import Linear
+from . import Loss
 
