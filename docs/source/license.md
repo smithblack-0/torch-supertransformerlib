@@ -1,5 +1,7 @@
 # License
 
+## Terms
+
 Copyright 2022 Christopher M O'Quinn
 
 Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"),
@@ -22,27 +24,6 @@ Credit for the development of this library must not be falsely represented as pe
 
 Long story short, do not scoop me. I need this
 to break into academics.
-
-*Definitions*
-
-* **Parameter injection** (PI) is henceforth the idea of feeding a self-attending transformer with a block of parameters
-    rather than data from a tensor stream.
-* **Autocalibration by Parameter Injection** is the concept in which parameter 
-injection is performed on the key and value input of an attention layer, 
-ensuring the possible outputs have fixed direction and length. it is performed
-* **Summary by Parameter Injection** refers to the process of 
-    parameter injection by filling in the "query" input of an attention
-    layer with parameters. 
-* **Global-Local Job Division** (GLJD) is henceforth the process
-    of taking a transformer in a banded environment
-* **Localization of information** Consists of taking a banded transformer
-in it's state as a local kernel and injecting positional information based on the index of the kernel.
-* **Transformer Specialization** is the idea of using the auto calibration abilities of parameter injection as a method to 
-increase the degrees of freedom without loss of generalization error,
-particularly by means of ensembles with minor exchange
-* **Global Strategy** is the idea of using a PI based
-summary to consider the situation at the global level for
-a text, irregardless of implicit order information.
 
 *Condition*
 

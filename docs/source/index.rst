@@ -9,9 +9,11 @@ Welcome to supertransformerlib's documentation!
 .. toctree::
    :maxdepth: 2
 
+   concepts
    README.md
+   api/api
    license.md
-   api
+
 
 What is this?
 =============

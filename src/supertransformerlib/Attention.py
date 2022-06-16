@@ -43,6 +43,8 @@ class FeedForward(nn.Module):
     where ensemble is optional, and only used if the ensemble
     channel was defined on initialization. Returns something
     of the same shape
+
+    See 'Attention is all you need' for details.
     """
     def __init__(self,
                  d_model: int,
@@ -68,9 +70,10 @@ class FeedForward(nn.Module):
 
     def forward(self, tensor: torch.Tensor):
         """
-        Simply expects a tensor.
+        :param tensor: A tensor to perform feedforward on
+        :return tensor: The result of feedforward processing.
+
         """
-        #tensor: (..., (ensembles), items, embedding)
         if self.ensembles is False:
             tensor = tensor.unsqueeze(-3) #(..., ensemble, items, embedding)
 
@@ -89,7 +92,6 @@ class FeedForward(nn.Module):
 
 class MultiHeadedAttention(nn.Module):
     """
-
     An ensemble-enabled implimentation of multiheaded attention.
 
     This is implimented as seen in "attention is all you need", with
@@ -142,7 +144,7 @@ class MultiHeadedAttention(nn.Module):
 
             :param query: The query. Of shape (..., (ensemble), items, embedding)
             :param key: The key, Of shape (..., (ensemble), content_items, embedding)
-            :param value: The value. Of shape, (..., (ensemble, content_items, embedding)
+            :param value: The value. Of shape, (..., (ensemble), content_items, embedding)
             :param mask: A bool mask. True masks. Optional. Of shape (..., (ensemble), items, content_items)
             :return: tensor. Attention result
             """
@@ -225,8 +227,8 @@ class PIMU(nn.Module):
 
         :param d_model: The embedding width. An int
         :param mem_width: The memory width. An int. Increases parameters
-        :param heads:
-        :param ensembles:
+        :param heads: The number of heads to use
+        :param ensembles: How many ensembles to set up. If none, dimension is disabled.
         """
         super().__init__()
 
@@ -253,6 +255,12 @@ class PIMU(nn.Module):
         self.DeheadProj = Linear([heads, head_channel_width], d_model, ensembles)
 
     def forward(self, query: torch.Tensor)-> torch.Tensor:
+        """
+        :param query: A tensor to gain insight on
+        :return: The calibrated result of the query.
+        """
+
+
         #query : (..., (ensemble), items, embedding_width)
         if self.ensembles:
             query = query.transpose(-2, -3) #(..., items, ensemble, embedding_width
@@ -368,9 +376,10 @@ class LCSA(nn.Module):
 
     A banded self attention class with positional
     intelligence. Once it constructs a convolutional
-    kernel, each dimension is head projected independently,
-    allowing conditioning to occur on the basis of what
-    relative position the word exists at in the kernel.
+    kernel, each dimension is projected using an
+    independent linear action. The net effect is the
+    layer can learn to consider words at different
+    positions in different manners.
 
     Multiple padding options exist allowing conditioning
     to be done based on only words that came before, only
@@ -379,6 +388,8 @@ class LCSA(nn.Module):
     One thing of note: The number of words passed into
     the layer MUST be equal to or greater than the kernel width.
     Remember to pad to above this length.
+
+    Combined with add+norm, this nicely handles local context.
 
     """
     def __init__(self,
@@ -419,7 +430,14 @@ class LCSA(nn.Module):
         self.value_projector = Linear(d_model, head_width, [ensemble, heads, kernel_width])
         self.dehead = Linear([heads, head_width], d_model, ensemble)
 
-    def forward(self, tensor: torch.Tensor, mask: Optional[torch.Tensor] = None) -> torch.Tensor:
+    def forward(self, tensor: torch.Tensor) -> torch.Tensor:
+        """
+
+
+        :param tensor: The tensor to perform self attention with. Shape (..., (ensemble), item, embedding).
+        :return: A tensor. The result of self attention. Shape (..., (ensemble), item, embedding)
+        :raise RuntimeError: If the number of items is too small for the kernel.
+        """
         #Tensor: (..., (ensemble), items, embedding)
 
         #Ensure ensemble
@@ -451,7 +469,7 @@ class LCSA(nn.Module):
 
         #Perform attention
 
-        attn = _dot_product_attention(query, key, value, mask) #(..., items, ensemble, head, 1, head_embed)
+        attn = _dot_product_attention(query, key, value) #(..., items, ensemble, head, 1, head_embed)
         attn = attn.squeeze(-2) #(..., items, ensemble, head, head_embedding)
 
         #Remove head and return
@@ -469,11 +487,13 @@ class EESA(nn.Module):
     Allows different ensembles to exchange information,
     while constraining available parameters among lower level units.
     Ensembles are only allowed to perform attention with units
-    whose index are equal to or lower then themselves.
+    whose index are equal to or lower then themselves. This is performed
+    by the attention mechanism.
 
     This, it is hoped, will help provide good test
     behavior by ensuring that even if one section is overfit, others
-    are not.
+    are not. It should have the effect of increasing fine tuning
+    speed as well.
 
     """
     def __init__(self,
@@ -481,6 +501,12 @@ class EESA(nn.Module):
                  heads: int,
                  ensembles: int,
                  ):
+        """
+
+        :param d_model: The size of the model embeddings
+        :param heads: The number of heads to use
+        :param ensembles: The number of ensembles to use.
+        """
         super().__init__()
         items = torch.arange(ensembles)
         raw_mask = items.unsqueeze(-1) + items.unsqueeze(-2)
@@ -490,76 +516,28 @@ class EESA(nn.Module):
         self.mask = mask
         self.Attn = MultiHeadedAttention(d_model, d_model, d_model, heads)
 
-    def forward(self, tensor: torch.Tensor):
+    def forward(self, tensor: torch.Tensor) -> torch.Tensor:
+        """
+
+        :param tensor: A tensor. Of shape (..., ensemble, items, embedding)
+        :return: Another tensor. Shape (..., ensemble, items, embedding)
+        """
         #tensor: (..., ensemble, items, embedding)
         tensor = tensor.transpose(-2, -3) #(..., items, ensembe, embedding)
         tensor = self.Attn(tensor, tensor, tensor, self.mask) #(..., items, ensemble, embedding)
         tensor = tensor.transpose(-2, -3) #(..., ensemble, items, embedding)
         return tensor
 
-class GLSA(nn.Module):
-    """
-
-    Global-Local Self Attention. (GLSA)
-
-    A double action attention module for
-    integrating global, unordered context.
-
-    This layer is for you if you wish to
-    perform attention over a very large number of words
-    and do not want to pay O(N^2) for the privilage. Instead,
-    the asymptotic behavior is of O(N), by providing limited
-    global context.
-
-    It should be noted that the global conditioning
-    and information is performed in an unordered
-    manner. Without some sort of local conditioning,
-    results will be poor.
-
-    """
-    def __init__(self,
-                 d_model: int,
-                 d_summary: int,
-                 summary_width: int,
-                 heads: int,
-                 ensembles: Optional[int] = None):
-        super().__init__()
-
-        if ensembles is None:
-            ensembles = 1
-            self.ensembles = False
-        else:
-            self.ensembles = True
-
-        self.global_attn = PISU(d_model, d_summary, summary_width, heads, ensembles)
-        self.norm = nn.LayerNorm(d_summary)
-        self.local_attn = MultiHeadedAttention(d_model, d_summary, d_model, heads, ensembles)
-
-    def forward(self,
-                tensor: torch.Tensor
-                ):
-        #tensor : (..., (ensemble), items, embedding
-
-        if self.ensembles is False:
-            tensor = tensor.unsqueeze(-3) #(..., ensemble, items, embedding)
-
-        global_summary = self.global_attn(tensor) #(..., ensemble, global_width, embedding)
-        normed = self.norm(global_summary)
-        output = self.local_attn(tensor, normed, normed)
-
-        if self.ensembles is False:
-            output = output.squeeze(-3)
-
-        return output
 
 class GSPU(nn.Module):
     """
-    Global Strategic Processing Unit. Type 1
+    Global Strategic Processing Unit.
 
-    An extension of GLSA, this essentially
-    performs a summary process, and then has
-    an internal stack it uses to
-    process the summary.
+    This essentially performs a PISU summary
+    processses the summary by whatever arbritary logic
+    desired, then uses this to generate a conditioning
+    tensor for each individual word. Combined with
+    add+norm, it takes care of global context.
     """
     def _straightthrough(self, tensor: torch.tensor):
         return tensor
@@ -576,12 +554,12 @@ class GSPU(nn.Module):
         """
 
         :param d_model: The input model embedding width
-        :param d_summary: How wide to make the
-        :param summary_width: How wide to make the summary embedding
+        :param d_summary: How wide to make the summary embedding. Internal, and fed to the layers
+        :param summary_width: How long the PISU summary will be in the item dimension.
         :param pisu_heads: How many heads the PISU process should use. Must be compatible with d_model
         :param mha_heads: How many heads the final MHA process will use.
         :param layers: Optional. layers which may lie in between the global generation and
-            feedback.
+            feedback. Without this, it is equivalent to
         :param dropout: Optional. The strengh of the dropout process during the add+layernorm
         :param ensembles: Optional. How many ensembles to make.
         """
@@ -608,7 +586,13 @@ class GSPU(nn.Module):
         self.Localize = MultiHeadedAttention(d_model, d_summary, d_model, mha_heads, ensembles)
 
 
-    def forward(self, tensor: torch.Tensor):
+    def forward(self, tensor: torch.Tensor)-> torch.Tensor:
+        """
+
+        :param tensor: A tensor, of shape (..., (ensemble), items, embedding)
+        :return:  A tensor, of shape (..., (ensemble), items, embedding)
+        """
+
         #tensor: (..., (ensemble), items, normal_embedding)
         if self.ensembles is False:
             tensor = tensor.unsqueeze(-3) #(..., ensemble, items, normal_embedding)

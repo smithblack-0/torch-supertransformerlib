@@ -54,8 +54,6 @@ independent manner.
 among nearby tensors. This is a banded attention.
 * EESA: Use this only when processing an ensemble tensor. It allows
 the exchange of data from lower level ensembles to higher level ones, but not vice versa.
-* GLSA: Pair this up with LCSA for handling global 
-relations between entities.
 * GSPU: Use this, with an internal transformer stack, when the model really
 needs to be able to reason about the big picture.
 
