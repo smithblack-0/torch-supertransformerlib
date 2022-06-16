@@ -1,7 +1,7 @@
 import unittest
 import torch
 
-from src.supertransformerlib import Attention
+from docs.source import Attention
 
 
 def shape_equal(shape1, shape2):
