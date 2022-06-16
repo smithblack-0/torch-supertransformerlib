@@ -177,6 +177,12 @@ def local(tensor: torch.Tensor,
     See 'dilocal' for a version of this which is fast when dealing with many dilations in parallel, as in banding.
     Padding by this much is guaranteed to prevent information loss.
 
+    :param tensor: The tensor to take a local kernel out of
+    :param kernel_width: How wide to make the kernel
+    :param stride_rate: How fast to make the stride rate
+    :param dilation_rate: How large the dilation rate should be
+    :param start_offset: How long to wait before sampling from the tensor
+    :param end_offset: Where to stop sampling from the tensor
     """
 
     # Input Validation
