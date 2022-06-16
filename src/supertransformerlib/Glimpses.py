@@ -238,9 +238,6 @@ def dilocal(tensor: torch.Tensor,
     are padded with zero if there would not be a reference in the original tensor, such as
     edge dilations.
 
-    Note that kernels of even width act as though they are kernels of odd width, but with
-    the central entry excluded.
-
     :param tensor: The input to localize
     :param kernel_width: The kernel to use
     :param stride_rate: The stride rate to use
