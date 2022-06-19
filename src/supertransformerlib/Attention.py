@@ -534,7 +534,6 @@ class EESA(nn.Module):
         tensor = tensor.transpose(-2, -3)  # (..., ensemble, items, embedding)
         return tensor
 
-
 class GSPU(nn.Module):
     """
     Global Strategic Processing Unit.
@@ -544,6 +543,8 @@ class GSPU(nn.Module):
     desired, then uses this to generate a conditioning
     tensor for each individual word. Combined with
     add+norm, it takes care of global context.
+
+
     """
 
     def _straightthrough(self, tensor: torch.tensor):
