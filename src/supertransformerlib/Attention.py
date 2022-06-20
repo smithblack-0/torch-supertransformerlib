@@ -29,7 +29,7 @@ def _dot_product_attention(
         logits = logits.masked_fill(mask, -1e+8)
     score = torch.softmax(logits, dim=-1)
     attn = torch.matmul(score, value)
-    attn = attn / torch.sqrt(torch.tensor([query.shape[-1]]))
+    attn = attn / torch.sqrt(torch.tensor([query.shape[-1]], device=logits.device))
     return attn
 
 
