@@ -534,6 +534,7 @@ class EESA(nn.Module):
         tensor = tensor.transpose(-2, -3)  # (..., ensemble, items, embedding)
         return tensor
 
+
 class GSPU(nn.Module):
     """
     Global Strategic Processing Unit.
