@@ -28,6 +28,14 @@ class test_dotproductattention(unittest.TestCase):
         attn = Attention._dot_product_attention(query, content, content, mask)
     def test_torchscript_compile(self):
         test = torch.jit.script(Attention._dot_product_attention)
+    @unittest.skipUnless(torch.cuda.is_available(), "gpu test requires valid gpu install")
+    def test_gpu(self):
+        """ tests if the gpu runs okay """
+        device = torch.device("cuda")
+        query = torch.randn([3, 5, 10, 20]).to(device)
+        content = torch.randn([3, 5, 30, 20]).to(device)
+        mask = (torch.randn([10, 30]) > 0.5).to(device)
+        attn = Attention._dot_product_attention(query, content, content, mask)
 
 
 class test_MultiHeadedAttention(unittest.TestCase):
@@ -96,14 +104,22 @@ class test_MultiHeadedAttention(unittest.TestCase):
         test_a_vals = attn[:, :-1]
         test_b_vals = update_attn[:, :-1]
         self.assertTrue(torch.all(test_a_vals == test_b_vals))
-
-
-
     def test_torchscript_compile(self):
+        """ Tests that MHA works when torchscript compiled."""
         query = torch.randn([3,5,10, 64])
         content = torch.randn([3, 5, 30, 16])
         mask = torch.randn([10, 30]) > 0.5
         layer = Attention.MultiHeadedAttention(64, 16, 32, 4, 5)
+        layer = torch.jit.script(layer)
+        attn = layer(query, content, content, mask)
+    @unittest.skipUnless(torch.cuda.is_available(), "Gpu not availble")
+    def test_mha_cuda(self):
+        """ tests if MHA works in a cuda environment."""
+        device = torch.device("cuda")
+        query = torch.randn([3,5,10, 64]).to(device)
+        content = torch.randn([3, 5, 30, 16]).to(device)
+        mask = (torch.randn([10, 30]) > 0.5).to(device)
+        layer = Attention.MultiHeadedAttention(64, 16, 32, 4, 5).to(device)
         layer = torch.jit.script(layer)
         attn = layer(query, content, content, mask)
 
@@ -132,6 +148,14 @@ class test_PIMU(unittest.TestCase):
         layer = torch.jit.script(layer)
         injected = layer(query)
 
+    @unittest.skipUnless(torch.cuda.is_available(), "no cuda environment")
+    def test_cuda(self):
+        """ Tests whether PIMA works in a cuda environment"""
+        device = torch.device("cuda")
+        query = torch.randn([3, 5, 10, 32]).to(device)
+        layer = Attention.PIMU(32, 10, 4, 5).to(device)
+        layer = torch.jit.script(layer)
+        injected = layer(query)
 
 class test_PISU(unittest.TestCase):
     def test_basic(self):
@@ -143,18 +167,31 @@ class test_PISU(unittest.TestCase):
         summary_shape = torch.tensor(summary.shape)
         expected_shape = torch.tensor([3, 5, 4, 16])
         self.assertTrue(torch.all(summary_shape == expected_shape))
+
     def test_ensemble(self):
         """ Test whether the ensembled PISU instance works"""
         query = torch.randn([3,5, 10, 32])
         layer = Attention.PISU(32, 16, 20, 4, 5)
         summary = layer(query)
         self.assertTrue(shape_equal([3, 5, 20, 16], summary.shape))
+
     def test_torchscript_compile(self):
         """ Tests whether torchscript safely compiles"""
         query = torch.randn([3,5, 10, 32])
         layer = Attention.PISU(32, 16, 20, 4, 5)
         layer = torch.jit.script(layer)
         summary = layer(query)
+
+    @unittest.skipUnless(torch.cuda.is_available(), "No gpu available")
+    def test_cuda(self):
+        """ Tests whether PISU works in a cuda environment"""
+        device = torch.device("cuda")
+        query = torch.randn([3,5, 10, 32]).to(device)
+        layer = Attention.PISU(32, 16, 20, 4, 5).to(device)
+        layer = torch.jit.script(layer)
+        summary = layer(query)
+
+
 
 class test_EESA(unittest.TestCase):
     """
@@ -196,7 +233,6 @@ class test_EESA(unittest.TestCase):
         layer = torch.jit.script(layer)
         output = layer(query)
         self.assertTrue(shape_equal(output.shape, [3, ensembles, items, d_model]))
-
 
 class test_LCSA(unittest.TestCase):
     """
