@@ -3,6 +3,7 @@ from torch.utils import benchmark
 from src.supertransformerlib import Attention
 
 
+print(torch.cuda.is_available())
 
 pisu = Attention.PISU(64, 64, 10, 8).to(torch.device("cuda"))
 pisu = torch.jit.script(pisu)
