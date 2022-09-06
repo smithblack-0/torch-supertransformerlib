@@ -103,7 +103,12 @@ class Linear(nn.Module):
         self._kernel = nn.Parameter(kernel)
         self._bias = nn.Parameter(bias)
 
-    def forward(self, tensor):
+    def forward(self, tensor: torch.Tensor):
+        """
+
+        :param tensor: The tensor to perform linear operations with. Given in [..., ensemble, d_model] or [..., d_model]
+        :return:
+        """
 
         # Flatten the relevent dimensions
 

@@ -381,9 +381,9 @@ class LCSA(nn.Module):
     layer can learn to consider words at different
     positions in different manners.
 
-    Multiple padding options exist allowing conditioning
-    to be done based on only words that came before, only
-    words that come after, or a centered view with both.
+        Multiple padding options exist allowing conditioning
+        to be done based on only words that came before, only
+        words that come after, or a centered view with both.
 
     One thing of note: The number of words passed into
     the layer MUST be equal to or greater than the kernel width.

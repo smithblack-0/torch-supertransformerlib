@@ -5,22 +5,22 @@ import seaborn as sns
 import pandas as pd
 from matplotlib import pyplot as plt
 
-pimu = Attention.PIMU(64, 10, 8).to(torch.device("cuda"))
-pimu = torch.jit.script(pimu)
+mha = Attention.MultiHeadedAttention(64, 10, 8).to(torch.device("cuda"))
+mha = torch.jit.script(mha)
 data = torch.randn([1, 30000, 64]).to(torch.device("cuda"))
-sample_sizes = torch.arange(50, 10000, 50)
+sample_sizes = torch.arange(10, 1000, 10)
 
 benchmarks = []
-times = 50
+times = 400
 for sample_size in sample_sizes:
     timer = benchmark.Timer(
-        stmt="pimu(data)",
-        setup="from __main__ import pimu",
+        stmt="mha(data)",
+        setup="from __main__ import mha",
         globals={"data" : data[:, :sample_size]},
-        description= "pisu with s% entries" % int(sample_size)
+        description= "mha with s% entries" % int(sample_size)
     )
     benchmarks.append(timer.timeit(times))
-    print("done with sampels of %s" % sample_size)
+    print("done with samples of %s" % sample_size)
 
 compare = benchmark.Compare(benchmarks)
 compare.print()
