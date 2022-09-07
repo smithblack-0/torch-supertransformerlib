@@ -4,7 +4,7 @@ import torch
 from torch import nn
 
 from . import Glimpses
-from .Linear import Linear
+from .Core import Linear
 
 
 def _dot_product_attention(
