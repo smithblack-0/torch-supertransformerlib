@@ -68,6 +68,24 @@ class EnsembleSpace(nn.Module):
     regarding additional dimensions, which will broadcast and
     then pushed onto the front dimensions of the returned kernel.
 
+    As an example, consider a registered kernel defined as a parameter of shape
+    Parameter(10, 3, 5,20) with name "test_kernel". This has, naturally, an ensemble width of
+    10. If you define the follow configurations with the following shapes :
+
+
+    configuration1 = tensor(1, 10)
+    configuration2 = tensor(13, 10)
+    configuration3 = tensor(3, 5, 12, 10)
+
+    The kernel shapes you will get if you perform self.test_kernel would be
+
+    result1 = tensor(1, 3, 5, 12, 10)
+    result2 = tensor(13, 3, 5, 12, 10)
+    result3 = tensor(3, 5, 12, 3,5, 12, 10)
+
+    Notice that only the last dimension is reduced, and the configuration is
+    broadcast across the rest of the tensor. This allows, for example, batch
+    dependent setup and processing.
 
     ---- Examples ----
 
@@ -78,90 +96,142 @@ class EnsembleSpace(nn.Module):
     with it being the case each batch may have a different configuration.
     What would that look like? Lets go see
 
+    ```
+    import torch
+    from torch import nn
+    from src.supertransformerlib import Core
 
+
+    # Setup
+    ensemble_width = 20
+    d_model = 32
+    batch_size = 16
+
+    mockup_data_tensor = torch.randn([batch_size, d_model])
+
+    # Define the layers
+
+
+    class AddBias(Core.EnsembleSpace):
+        def __init__(self, ensemble_width, d_model):
+            super().__init__(ensemble_width)
+            bias_kernel = torch.zeros([ensemble_width, d_model])
+            bias_kernel = nn.Parameter(bias_kernel)
+            self.bias_kernel = bias_kernel
+            self.register_ensemble("bias_kernel")
+        def forward(self, tensor):
+            # Note that the raw kernel would be 20 x 32, not the required 16x32
+            # It MUST be rebuilding the kernel using the ensemble if this works.
+            kernel = self.bias_kernel
+            return tensor + kernel
+
+    class ConfigureThenAdd(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.configuration_generator = nn.Linear(d_model, ensemble_width)
+            self.add_layer = AddBias(ensemble_width, d_model)
+        def forward(self, tensor):
+            configuration = self.configuration_generator(tensor)
+            self.add_layer.configuration = configuration
+            return self.add_layer(tensor)
+
+    instance = ConfigureThenAdd()
+    instance = torch.jit.script(instance) #Notice torchscript works. Yay!
+    instance(mockup_data_tensor)
+
+    ```
     """
+
+    @property
+    def ensemble_enabled(self)->bool:
+        return self.native_ensemble_width > 0
+    @staticmethod
+    def rebalance_probability(tensor: torch.Tensor):
+        return tensor / tensor.sum(dim=-1).unsqueeze(-1)
     @property
     def configuration(self)->torch.Tensor:
         return self._configuration
-    @configuration.setter
-    def configuration(self, config: torch.Tensor):
+
+    @torch.jit.export
+    def set_configuration(self, config: torch.Tensor, logit: bool = True, recursive: bool = True):
+        self.debug_bit += 1
+
         if not isinstance(config, torch.Tensor):
             raise ValueError("Configuration must be a tensor")
         if config.dim() < 2:
             raise ValueError("Configuration must have two or more dimesions")
         elif config.shape[-1] != self.native_ensemble_width:
             raise ValueError("Configuration last dimension bad. Expected %s, got %s"
-                             % (self.native_ensemble_width, self.configuration.shape[-1]))
+                             % (self.native_ensemble_width, config.shape[-1]))
+        print(config)
 
-
-        #Handle construction, whether it be a top-p, top-k, or standard instance
-
-        configuration = config.to(dtype=self.dtype)
-        configuration = torch.softmax(configuration, dim=-1)
-        if self.top_k is not None:
-            # Create the top k sparse configuration
-            #
-            # Do this by finding the top k indices, making
-            # a mask, then masking the configuration and performing
-            # the probabilistic change.
-            _, indices = torch.topk(configuration, self.top_k, dim=-1)
-            indices = indices.unsqueeze(-1)
-            mask = torch.arange(self.native_ensemble_width)
-            mask = indices == mask
-            mask = torch.any(mask, dim=-2)
-            configuration = configuration * mask
-
-        elif self.top_p is not None:
-            ### Develop the top-p driven case
-            #
-            # This will consist of finding by cumulative sums the
-            # sorted layer at which we transition above the top
-            # p, then generating and applying a mask based on these
-            # indices.
-
-            #Extract the relevant indices in an efficient manner
-
+        #Handle conversion of config logit input into a usable format
+        if logit:
+            configuration = config.to(dtype=self.dtype)
             configuration = torch.softmax(configuration, dim=-1)
-            sorted, indices = torch.sort(configuration, descending=True, dim=-1)
+            if self.top_k is not None:
+                # Create the top k sparse configuration
+                #
+                # Do this by finding the top k indices, making
+                # a mask, then masking the configuration and performing
+                # the probabilistic change. Then we rebalance the probabilites
+                _, indices = torch.topk(configuration, self.top_k, dim=-1)
+                indices = indices.unsqueeze(-1)
+                mask = torch.arange(self.native_ensemble_width)
+                mask = indices == mask
+                mask = torch.any(mask, dim=-2)
+                configuration = configuration * mask
+                configuration = self.rebalance_probability(configuration)
 
-            #Promote interesting dimension to front for zippiing
-            sorted = sorted.unsqueeze(0).transpose(0, -1).squeeze(-1)
-            indices = indices.unsqueeze(0).transpose(0, -1).squeeze(-1)
+            elif self.top_p is not None:
+                ### Develop the top-p driven case
+                #
+                # This will consist of finding by cumulative sums the
+                # sorted layer at which we transition above the top
+                # p, then generating and applying a mask based on these
+                # indices.
 
-            #Setup and extract indices
-            cumulative_probability = torch.zeros(configuration.shape[:-1])
-            mask_construction_indices: List[torch.Tensor] = []
-            off = torch.full(cumulative_probability.shape, -1)
-            for probabilities, index_layer in zip(sorted, indices):
-                cumulative_probability_lower_then_p = cumulative_probability < self.top_p
-                mask_update = torch.where(cumulative_probability_lower_then_p, index_layer, off)
-                mask_construction_indices.append(mask_update)
-                cumulative_probability += probabilities
-                if torch.all(cumulative_probability >= self.top_p):
-                    break
+                #Extract the relevant indices in an efficient manner
 
-            mask_indices = torch.stack(mask_construction_indices, dim=-1).unsqueeze(-1)
-            mask = mask_indices == torch.arange(self.native_ensemble_width)
-            mask = torch.any(mask, dim=-2)
-            configuration = configuration*mask
+                configuration = torch.softmax(configuration, dim=-1)
+                sorted, indices = torch.sort(configuration, descending=True, dim=-1)
 
-        configuration = torch.softmax(configuration, dim=-1)
-        self._configuration = configuration
+                #Promote interesting dimension to front for zippiing
+                sorted = sorted.unsqueeze(0).transpose(0, -1).squeeze(-1)
+                indices = indices.unsqueeze(0).transpose(0, -1).squeeze(-1)
 
-    def set_configuration(self, configuration: torch.Tensor):
-        """
-        Recursively sets this layers configuration and
-        the configuration of all detected child layers
+                #Setup and extract indices
+                cumulative_probability = torch.zeros(configuration.shape[:-1])
+                mask_construction_indices: List[torch.Tensor] = []
+                off = torch.full(cumulative_probability.shape, -1)
+                for probabilities, index_layer in zip(sorted, indices):
+                    cumulative_probability_lower_then_p = cumulative_probability < self.top_p
+                    mask_update = torch.where(cumulative_probability_lower_then_p, index_layer, off)
+                    mask_construction_indices.append(mask_update)
+                    cumulative_probability += probabilities
+                    if torch.all(cumulative_probability >= self.top_p):
+                        break
 
-        This can be utilized to have a large synced
-        group.
+                mask_indices = torch.stack(mask_construction_indices, dim=-1).unsqueeze(-1)
+                mask = mask_indices == torch.arange(self.native_ensemble_width)
+                mask = torch.any(mask, dim=-2)
+                configuration = configuration*mask
+                configuration = self.rebalance_probability(configuration)
+                config = configuration
 
-        :param configuration: The configuration to set
-        """
-        for child in self.children():
-            if isinstance(child, EnsembleSpace):
-                child.set_configuration(configuration)
-        self.configuration = configuration
+        self._configuration = config
+
+        #handle recursive updating
+        if recursive:
+            for child in self.children():
+                if hasattr(child, "set_configuration"):
+                   child.set_configuration(config, False)
+
+    @configuration.setter
+    def configuration(self, config: torch.Tensor):
+        self.debug_bit += 1
+        recurse = self.recursive
+        self.set_configuration(config, True, recursive=recurse)
 
     def register_ensemble(self, name: str, attribute: Optional[Union[nn.Parameter, torch.Tensor]] = None):
         """
@@ -186,7 +256,6 @@ class EnsembleSpace(nn.Module):
                 raise AttributeError("Attempt to access attribute of name %s which does not exist" % name)
             else:
                 attribute = self.__getattribute__(name)
-
         if not isinstance(attribute, torch.Tensor):
             raise AttributeError("Ensemble attribute of name %s is not a tensor" % name)
         if attribute.dim() < 2:
@@ -197,9 +266,18 @@ class EnsembleSpace(nn.Module):
                 attribute.shape[0],
                 self.native_ensemble_width
             ))
-        self._registry[name] = attribute.to(self.dtype)
+        if name in self.__dict__:
+            del self.__dict__[name]
 
-    def construct_ensemble(self, name)->torch.Tensor:
+        attribute = attribute.to(self.dtype)
+        if isinstance(attribute, nn.Parameter):
+            self.register_parameter(name, attribute)
+            self._registry[name] = "parameter"
+        else:
+            self.register_buffer(name, attribute)
+            self._registry[name] = "buffer"
+
+    def construct_ensemble(self, kernel: Union[torch.Tensor, nn.Parameter])->torch.Tensor:
         """
         Construct a kernel in which all but the last
         configuration entry is broadcast onto the end
@@ -211,14 +289,14 @@ class EnsembleSpace(nn.Module):
         :param name: The attribute to construct
         :return: The constructed attribute
         """
-        attribute = self._registry[name]#(ensemble_width, ..., dim1, dim0)
+        #attribute: (ensemble_width, ..., dim1, dim0)
         configuration = self.configuration #(..., ensemble_width)
         # In the case of a ensemble_width of 0, the ensemble is disabled
         # and should just return the kernel directly. This supports
         # simpler code using register ensemble
 
         if self.native_ensemble_width == 0:
-            return attribute
+            return kernel
 
         # This functions by performing a matrix multiplication
         # across the ensemble dimension. Notably, it is the case
@@ -240,27 +318,26 @@ class EnsembleSpace(nn.Module):
         # perform a sparse matrix multiplication, then restore
         # the tensor dimensions.
 
-        restoration_shape = torch.Size(list(configuration.shape[:-1]) + list(attribute.shape[1:]))
-        attribute = attribute.flatten(1)
+        restoration_shape = torch.Size(list(configuration.shape[:-1]) + list(kernel.shape[1:]))
+        kernel = kernel.flatten(1)
         configuration = configuration.flatten(0, -2)
         configuration = configuration.masked_fill(configuration < self.sparse_epsilon, 0.0)
         configuration = configuration.to_sparse_coo()
-        output = torch.sparse.mm(configuration, attribute)
+        output = torch.sparse.mm(configuration, kernel)
         output = output.view(restoration_shape)
         return output
-
-
+    def __getattr__(self, item):
+        """
+        Runs the kernel rebuilt if it is found within
+        the registry. Else, hands off to torch
+        """
+        outcome = super().__getattr__(item)
+        if hasattr(self, "_registry") and item in self._registry:
+            return self.construct_ensemble(outcome)
+        return super().__getattr__(item)
 
     def __getattribute__(self, item):
-        """
-        Gets the given attribute.
-        If the attribute is registered as a ensemble, applies the current configuration
-        Else, does nothing."""
-        if item in ("_registry", "configuration", "construct_ensemble", "__dict__"):
-            return super().__getattribute__(item)
-        if hasattr(self, "_registry") and item in self._registry:
-            return self.construct_ensemble(item)
-        else:
+
             # Torchscript functions in such a way that
             # the getattr function does not work.
             #
@@ -276,20 +353,20 @@ class EnsembleSpace(nn.Module):
                 return super().__getattribute__(item)
             except AttributeError:
                 return self.__getattr__(item)
+    @torch.jit.export
+    def get_debug(self):
+        output: List[int] = [self.debug_bit]
+        for child in self.children():
+            if hasattr(child, "debug_bit"):
+                output.append(child.debug_bit)
 
-    def __setattr__(self, key, value):
-        """Sets the given attribute. Redirects registered items into registry"""
-        if not hasattr(self, "_registry"):
-            return super().__setattr__(key, value)
-        if key in self._registry:
-            self._registry[key] = value
-        super().__setattr__(key, value)
-
+        return output
     def __init__(self,
                  ensemble_width: int,
                  top_k: Optional[int] = None,
                  top_p: Optional[float] = None,
                  configuration: Optional[torch.Tensor] = None,
+                 recursive: bool = False,
                  sparse_epsilon=0.0001,
                  dtype: torch.dtype = torch.float32,
                  ):
@@ -308,6 +385,8 @@ class EnsembleSpace(nn.Module):
                         This engages sparse logic.
         :param configuration: Optional. A passed configuration
                         Must follow the configuration rules outlined above
+        :param recursive: A bool. Whether performing a configuration
+            set will recursively set the layers beneath.
         :param sparse_epsilon:
                     The configuration probability below which to exclude the
                     configuration as an option during ensemble construction.
@@ -323,8 +402,9 @@ class EnsembleSpace(nn.Module):
         self.top_p = top_p
         self.sparse_epsilon = sparse_epsilon
         self.native_ensemble_width = ensemble_width
-        self._registry: Dict[str, Union[torch.nn.Parameter, nn.Parameter]] = {}
+        self._registry: Dict[str, str] = {}
         self.dtype = dtype
+        self.debug_bit = 0
         super().__init__()
 
         #Some sort of configuration is required for torchscript to be happy.
@@ -333,13 +413,28 @@ class EnsembleSpace(nn.Module):
         #later. We initialize it to a basic configuration compatible with the
         #problem.
 
+        self.recursive = recursive
         if configuration is None:
             configuration = torch.softmax(torch.ones([1, ensemble_width], dtype=dtype), dim=-1)
         self.configuration = configuration
 
+class Utility:
+    """ A place for utility methods to belong"""
+
+    def standardize_input(self, input: Union[torch.Tensor, List[int], int])->torch.Tensor:
+        """
+        Convert an input in one of three formats into a common single format of tensor
+        Sanitize and throw errors if there is a problem
+        """
+        if not isinstance(input, (torch.Tensor, list, int)):
+            raise ValueError("Illegal constructor argument. Type cannot be %s" % type(input))
+        if isinstance(input, int):
+            input = [input]
+        output = torch.tensor(input, dtype=torch.int64)
+        return output
 
 
-class Linear(EnsembleSpace):
+class Linear(Utility, EnsembleSpace):
     """
     A linear layer allowing a number of tricks to be deployed in parallel.
     These tricks are:
@@ -415,24 +510,21 @@ class Linear(EnsembleSpace):
     Would do the trick, by weighting each option equally. It is also possible to specify the configuration
     more directly. Any extra dimensions will pop out right before the batch info starts. See
     EnsembleSpace for more details.
+
+    ---- Combination ----
+
+    when both parallization and dynamic configuration is present, the order of resolution across dimensions,
+    from right to left, is first the autoshaping specifications, then the parallelization, and finally the
+    dynamic specifications.
+
+
     """
-    def standardize_input(self, input: Union[torch.Tensor, List[int], int])->torch.Tensor:
-        """
-        Convert an input in one of three formats into a common single format of tensor
-        Sanitize and throw errors if there is a problem
-        """
-        if not isinstance(input, (torch.Tensor, list, int)):
-            raise ValueError("Illegal constructor argument. Type cannot be %s" % type(input))
-        if isinstance(input, int):
-            input = [input]
-        output = torch.tensor(input, dtype=torch.int64)
-        return output
 
     def __init__(self,
                  input_shape: Union[torch.Tensor, List[int], int],
                  output_shape: Union[torch.Tensor, List[int], int],
                  parallel: Optional[Union[torch.Tensor, List[int], int]] = None,
-                 dynamics: Optional[Union[torch.Tensor, List[int], int]] = None,
+                 dynamics: Optional[int] = None,
                  use_bias: bool = True,
                  top_k: Optional[int] = None,
                  top_p: Optional[int] = None
@@ -453,12 +545,11 @@ class Linear(EnsembleSpace):
         if parallel is None:
             parallel = []
         if dynamics is None:
-            dynamics = []
+            dynamics = 0
 
         input_shape = self.standardize_input(input_shape)
         output_shape = self.standardize_input(output_shape)
         parallel = self.standardize_input(parallel)
-        dynamics = self.standardize_input(dynamics)
 
         #Begin developing kernel shapes and conversions
 
@@ -488,17 +579,15 @@ class Linear(EnsembleSpace):
         #This flag is called "is_ensemble", and has
         #an effect on the forward method.
 
-        if dynamics.shape[0] > 0:
-            ensemble_width = dynamics.shape[-1]
-            self.is_ensemble = True
+        if dynamics > 0:
+            ensemble_width = dynamics
+            matrix_shape = torch.concat([torch.tensor([ensemble_width]), matrix_shape])
+            if use_bias:
+                bias_shape = torch.concat([torch.tensor([ensemble_width]), bias_shape])
         else:
-            ensemble_width = 1
-            self.is_ensemble = False
+            ensemble_width = 0
 
         super().__init__(ensemble_width, top_k=top_k, top_p=top_p)
-        matrix_shape = torch.concat([torch.tensor([ensemble_width]), matrix_shape])
-        if use_bias:
-            bias_shape = torch.concat([torch.tensor([ensemble_width]), bias_shape])
 
         #Generate actual kernels
 
@@ -518,11 +607,13 @@ class Linear(EnsembleSpace):
         self.output_map_reference = output_autoshape_mapping
 
         self.matrix_kernel = matrix_kernel
-        self.register_ensemble("matrix_kernel")
+        if self.ensemble_enabled:
+            self.register_ensemble("matrix_kernel")
 
         if use_bias:
             self.bias_kernel = bias_kernel
-            self.register_ensemble("bias_kernel")
+            if self.ensemble_enabled:
+                self.register_ensemble("bias_kernel")
 
     def forward(self, tensor: torch.Tensor):
 
@@ -536,13 +627,10 @@ class Linear(EnsembleSpace):
         flattened_input = Glimpses.reshape(tensor,input_shape, row_length)
         flattened_input = flattened_input.unsqueeze(-1)
         if self.use_bias:
-            flattened_output = torch.matmul(self.matrix_kernel, flattened_input).squeeze(-1) + self.bias_kernel
+            flattened_output = torch.matmul(self.matrix_kernel, flattened_input).squeeze(-1)
+            flattened_output = flattened_output + self.bias_kernel
         else:
             flattened_output = torch.matmul(self.matrix_kernel, flattened_input)
         restored_output = Glimpses.reshape(flattened_output, column_length, output_shape)
-
-        if not self.is_ensemble:
-            restored_output = restored_output.squeeze(-self.matrix_kernel.dim()+1)
-
         return restored_output
 

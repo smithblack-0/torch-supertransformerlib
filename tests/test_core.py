@@ -1,5 +1,6 @@
 import unittest
 import torch
+from torch import nn
 import itertools
 
 import src.supertransformerlib.Core
@@ -22,6 +23,7 @@ class buffer_mockup(src.supertransformerlib.Core.EnsembleSpace):
         self.d_model = 20
         self.batch_fun = 4
         self.kernel = torch.randn([self.native_ensemble_width, self.d_model])
+        self.kernel = nn.Parameter(self.kernel)
         self.register_ensemble("kernel")
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -126,21 +128,22 @@ class test_EnsembleSpace(unittest.TestCase):
         """Test that load ensemble is working correctly for a few known, manually configured values"""
         epsilion = 0.0001
 
+        off = -1e+8
         test_cases = [
             {"ensemble" : torch.tensor([[0,1.],[2,3]]),
              "config" : torch.tensor([[0.5, 0.5]]),
              "output" : torch.tensor([[1.0, 2.0]])
              },
             {"ensemble" : torch.tensor([[0,1],[2,3.]]),
-             "config" : torch.tensor([[1, 0], [0.5, 0.5], [0, 1]]),
+             "config" : torch.tensor([[1, off], [0.5, 0.5], [off, 1]]),
              "output" : torch.tensor([[0, 1],[1.0, 2.0],[2, 3]])
              }       ,
             {"ensemble": torch.tensor([[0, 1], [2, 3.]]),
-             "config": torch.tensor([[[0.5, 0.5]],[[0,1]]]),
+             "config": torch.tensor([[[0.5, 0.5]],[[off,1]]]),
              "output": torch.tensor([[[1.0, 2.0]],[[2, 3]]])
              },
             {"ensemble" : torch.tensor([[[0, 1.],[2,3]], [[3, 4],[4,5]]]),
-             "config" : torch.tensor([[1, 0], [0.5, 0.5], [0, 1]]),
+             "config" : torch.tensor([[1, off], [0.5, 0.5], [off, 1]]),
              "output" : torch.tensor([[[0, 1,],[2,3]],[[1.5, 2.5], [3, 4]],[[3,4],[4,5]]])
              }
         ]
@@ -265,8 +268,11 @@ class test_EnsembleSpace(unittest.TestCase):
         created_instance = buffer_mockup()
         statedict = created_instance.state_dict()
         torch.save(created_instance, "test_save.txt")
+        loaded_instance = torch.load("test_save.txt")
 
-        loaded_instance = torch.load("test_save.txt", "t")
+        for param_in_created, param_in_loaded in zip(created_instance.parameters(), loaded_instance.parameters()):
+            self.assertTrue(torch.all(param_in_created == param_in_loaded))
+
 
     def test_torchscript_assignment(self):
         """Test that all assignments work when using torchscript"""
@@ -292,6 +298,8 @@ class test_EnsembleSpace(unittest.TestCase):
         instance = mockup()
         instance = torch.jit.script(instance)
         instance.configuration = config
+    #TODO: Test set_configuration. Make sure to test under torchscript with nested layers.
+
 
 class testLinear(unittest.TestCase):
     """
@@ -395,7 +403,15 @@ class testLinear(unittest.TestCase):
         """Test whether or not it is the case that the dynamic ensembling system works"""
         test_tensor = torch.randn([30, 20, 20])
         layer = src.supertransformerlib.Core.Linear(20, 10, dynamics=2)
+        layer = torch.jit.script(layer)
 
-        configuration_1 = torch.tensor([0, 1])
-        configuration_2 = torch.tensor([[1,0],[0, 1]])
-        configuration_3 = torch.tensor([[0.5, 0.5], [3, 2]])
+        configuration_1 = torch.tensor([[0, 1]])
+        configuration_2 = torch.randn([20, 2])
+        configuration_3 = torch.randn([30, 20, 2])
+
+        layer.configuration = configuration_1
+        layer(test_tensor)
+        layer.configuration = configuration_2
+        layer(test_tensor)
+        layer.configuration = configuration_3
+        layer(test_tensor)

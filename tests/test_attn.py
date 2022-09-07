@@ -37,6 +37,47 @@ class test_dotproductattention(unittest.TestCase):
         mask = (torch.randn([10, 30]) > 0.5).to(device)
         attn = Attention._dot_product_attention(query, content, content, mask)
 
+class test_Feedforward(unittest.TestCase):
+    def test_straightforward(self):
+        """Test feedforward works without any tricks"""
+        test_tensor = torch.randn([10, 20, 4, 16])
+        instance = Attention.FeedForward(16)
+        instance = torch.jit.script(instance)
+        self.assertTrue(instance(test_tensor).shape == torch.Size([10, 20, 4, 16]))
+        self.assertTrue(torch.any(instance(test_tensor) != test_tensor))
+        output = instance(test_tensor)
+    def test_parallel(self):
+        """ Test the parallel processing system is engaging"""
+        test_tensor = torch.randn([10, 20, 4, 16])
+        instance = Attention.FeedForward(16, parallelization=[10, 20])
+        instance =torch.jit.script(instance)
+        output = instance(test_tensor)
+        self.assertTrue(output.shape == torch.Size([10, 20, 4, 16]))
+        self.assertTrue(torch.any(output != test_tensor))
+        output = instance(test_tensor)
+    def test_dynamics(self):
+        """Test the ability of the layer to update the dynamic features"""
+        test_tensor = torch.randn([10, 20, 4, 16])
+        config = torch.randn([10, 20])
+        config2 = torch.randn([10, 20])
+        instance = Attention.FeedForward(16, dynamics=20)
+        instance = torch.jit.script(instance)
+        print("debug", instance.get_debug())
+        assert hasattr(instance, "configuration")
+        instance.configuration = config
+        print("debug", instance.get_debug())
+        output1 = instance(test_tensor)
+        instance.configuration = config2
+        output2 = instance(test_tensor)
+        self.assertTrue(torch.any(output1 != output2))
+    def test_composite(self):
+        """Test all features working at once"""
+        test_tensor = torch.randn([5, 10, 20, 4, 16])
+        config = torch.randn([5, 10])
+        instance = Attention.FeedForward(16, parallelization=[20], dynamics=10, config=config)
+        instance = torch.jit.script(instance)
+        instance(test_tensor)
+        self.assertTrue(test_tensor.shape == torch.Size([5, 10, 20, 4, 16]))
 
 class test_MultiHeadedAttention(unittest.TestCase):
     """
@@ -50,7 +91,6 @@ class test_MultiHeadedAttention(unittest.TestCase):
     -- do ensembles work
     -- are ensembles processed independently
     -- does torchscript compile, so I can get an IR or ONNX if I need it?
-
 
     """
     def test_basic(self):

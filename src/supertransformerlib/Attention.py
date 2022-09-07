@@ -1,11 +1,10 @@
-from typing import Optional, List
+from typing import Optional, List, Union
 
 import torch
 from torch import nn
 
 from . import Glimpses
-from .Core import Linear
-
+from . import Core
 
 def _dot_product_attention(
         query: torch.Tensor,
@@ -33,75 +32,136 @@ def _dot_product_attention(
     return attn
 
 
-class FeedForward(nn.Module):
+class FeedForward(Core.EnsembleSpace, Core.Utility):
     """
     A feedforward layer for attention purposes.
-    Permits ensembling, but nothing clever
-    beyond that.
+    As a subclass of EnsembleSpace, and being built using
+    core linear layers, it supports the operations of
+    parallel execution along with ensemblelike configuration.
 
-    Expects inputs to be tensors in (..., (ensemble), item, embedding)
-    where ensemble is optional, and only used if the ensemble
-    channel was defined on initialization. Returns something
-    of the same shape
+    --- parallelization ---
 
-    See 'Attention is all you need' for details.
+    This is a feature better defined over on the Core.Linear
+    section. It may be defined just as in a linear layer,
+    and allows execution of a kernel across an entire tensor
+    independently and in parallel.
+
+    Long story short, the shape you place here will be
+    added onto the deployed kernels, such that a problem
+    with a tensor of shape (..., 20, 128) with
+    parallelization (10, 15) will require a tensor
+    of shape (..., 10, 15, 20, 128) and process each
+    defined dimensions with completely independent parameters
+
+    --- dynamics ---
+
+    This is a feature explained in the Core.Linear class. The long and
+    short of it is, however, that it will allow the ensemble space to function
+    correctly. Long story short, this determines whether or not configuration
+    can be utilized to reconfigure the ensemble and, if so, how many ensembles
+    there are to choose from.
+
+    --- configuration ---
+
     """
-
     def __init__(self,
                  d_model: int,
                  d_internal: int = 2048,
-                 ensembles: Optional[int] = None,
+                 parallelization: Optional[Union[torch.Tensor, List[int], int]] = None,
+                 dynamics: Optional[int] = None,
+                 config: Optional[torch.Tensor] = None,
+                 top_k: Optional[int] = None,
+                 top_p: Optional[int] = None,
                  ):
         """
 
-        :param d_model: How wide the model embedding is
-        :param d_internal: How wide the internal channel is
-        :param ensembles: How many ensembles to construct
+        :param d_model: The model width
+        :param d_internal: The internel width. By default 2048
+        :param parallelization: The parallization layers
+        :param dynamics: The dynamic width. None means off.
+        :param config: The config
+        :param top_k: See EnsembleSpace topk
+        :param top_p: See EnsembleSpace top_[
         """
-        super().__init__()
-        if ensembles is None:
-            ensembles = 1
-            self.ensembles = False
-        else:
-            self.ensembles = True
+        if dynamics is None:
+            dynamics = 0
 
-        self.ff1 = Linear(d_model, d_internal, ensembles)
-        self.activation = nn.ReLU()
-        self.ff2 = Linear(d_internal, d_model, ensembles)
+        super().__init__(dynamics,
+                         top_k = top_k,
+                         top_p = top_p,
+                         configuration = config,
+                         recursive=True)
+
+        #Setup a few flags
+
+        self.set_acces_flag = False
+
+        if parallelization is None:
+            self.ff1 = Core.Linear(d_model, d_internal, dynamics=dynamics)
+            self.activation = nn.ReLU()
+            self.ff2 = Core.Linear(d_internal, d_model, dynamics=dynamics)
+        else:
+            self.ff1 = Core.Linear(d_model, d_internal,
+                                    parallel=parallelization,
+                                    dynamics=dynamics
+                                   )
+            self.activation = nn.ReLU()
+            self.ff2 = Core.Linear(d_internal, d_model,
+                                    parallel=parallelization,
+                                    dynamics=dynamics
+                                   )
 
     def forward(self, tensor: torch.Tensor):
         """
         :param tensor: A tensor to perform feedforward on
         :return tensor: The result of feedforward processing.
-
         """
-        if self.ensembles is False:
-            tensor = tensor.unsqueeze(-3)  # (..., ensemble, items, embedding)
+        #Basically, we move the item dimension to the front
+        #of the tensor, apply the linear layers, and
+        #return the results
 
-        tensor = tensor.transpose(-2, -3)  # (..., items, ensemble, embedding)
-        tensor = self.ff1(tensor)  # (..., item, ensemble, internal)
+        tensor = tensor.unsqueeze(0).transpose(0, -2).squeeze(-2) #Transfer the item channel out of the wayh
+        tensor = self.ff1(tensor)  # (item, ..., (config), (ensemble), internal)
         tensor = self.activation(tensor)
-        tensor = self.ff2(tensor)  # (..., item, ensemble, embedding)
-        tensor = tensor.transpose(-2, -3)  # (..., ensemble, item, embedding)
-
-        if self.ensembles is False:
-            tensor = tensor.squeeze(-3)
+        tensor = self.ff2(tensor)  # (item,..., (config) , (ensemble), embedding)
+        tensor = tensor.unsqueeze(-2).transpose(0, -2).squeeze(0) #Transfer item back into position
         return tensor
 
 
-class MultiHeadedAttention(nn.Module):
+class MultiHeadedAttention(Core.EnsembleSpace, Core.Utility):
     """
-    An ensemble-enabled implimentation of multiheaded attention.
+    A Multiheaded Attention layer capable of
+    executing parallization alongside ensemble configured
+    assembly
 
-    This is implimented as seen in "attention is all you need", with
-    an additional option. The incoming content is projected to build
-    heads, dot product attention is performed, multiheaded combine
-    occurs, and the result is returned.
+    --- parallelization ---
 
-    A novel feature is the ensembles option. This may be left blank, but
-    if defined will revise the expected input shape to be (..., ensemble, items, embedding).
-    Each entry in ensembles will be processed in parallel, and with completely unique parameters.
+    This is a feature better defined over on the Core.Linear
+    section. It may be defined just as in a linear layer,
+    and allows execution of a kernel across an entire tensor
+    independently and in parallel.
+
+    Long story short, the shape you place here will be
+    added onto the deployed kernels, such that a problem
+    with a tensor of shape (..., 20, 128) with
+    parallelization (10, 15) will require a tensor
+    of shape (..., 10, 15, 20, 128) and process each
+    defined dimensions with completely independent parameters
+
+    --- dynamics ---
+
+    This is a feature explained in the Core.Linear class. The long and
+    short of it is, however, that it will allow the ensemble space to function
+    correctly. Long story short, this determines whether or not configuration
+    can be utilized to reconfigure the ensemble and, if so, how many ensembles
+    there are to choose from.
+
     """
+    @property
+    def configuration(self) ->torch.Tensor:
+        return super().configuration
+
+
 
     def __init__(self,
                  d_query: int,
