@@ -5,7 +5,7 @@ extended linear process.
 
 """
 import math
-from typing import Union, List, Optional, Dict
+from typing import Union, List, Optional, Dict, overload
 
 import torch
 from torch import nn
@@ -145,17 +145,101 @@ class EnsembleSpace(nn.Module):
     @property
     def ensemble_enabled(self)->bool:
         return self.native_ensemble_width > 0
+
+
+    ### Set and get configuration ###
+
+
+
     @staticmethod
-    def rebalance_probability(tensor: torch.Tensor):
+    def rebalance_probability(tensor: torch.Tensor)->torch.Tensor:
+        """Takes a tensor which consists of positive weights and turns it into something that sums up to one"""
         return tensor / tensor.sum(dim=-1).unsqueeze(-1)
+
+    def _process_config_options(self, configuration: torch.Tensor)->torch.Tensor:
+        """
+        A support function for set configuration. Converts a raw
+        logit into a probability.
+
+        :param config: The provided configuration. Expected to
+        have been sanity checked by this point
+        :return: The probabilistic configuration. In the right dtype as
+        """
+
+
+        if self.top_k is not None:
+            # Create the top k sparse configuration
+            #
+            # Do this by finding the top k indices, making
+            # a mask, then masking the configuration and performing
+            # the probabilistic change. Then we rebalance the probabilites
+            _, indices = torch.topk(configuration, self.top_k, dim=-1)
+            indices = indices.unsqueeze(-1)
+            mask = torch.arange(self.native_ensemble_width)
+            mask = indices == mask
+            mask = torch.any(mask, dim=-2)
+            configuration = configuration * mask
+            configuration = self.rebalance_probability(configuration)
+
+        elif self.top_p is not None:
+            ### Develop the top-p driven case
+            #
+            # This will consist of finding by cumulative sums the
+            # sorted layer at which we transition above the top
+            # p, then generating and applying a mask based on these
+            # indices.
+
+            # Extract the relevant indices in an efficient manner
+
+            configuration = torch.softmax(configuration, dim=-1)
+            sorted, indices = torch.sort(configuration, descending=True, dim=-1)
+
+            # Promote interesting dimension to front for zippiing
+            sorted = sorted.unsqueeze(0).transpose(0, -1).squeeze(-1)
+            indices = indices.unsqueeze(0).transpose(0, -1).squeeze(-1)
+
+            # Setup and extract indices
+            cumulative_probability = torch.zeros(configuration.shape[:-1])
+            mask_construction_indices: List[torch.Tensor] = []
+            off = torch.full(cumulative_probability.shape, -1)
+            for probabilities, index_layer in zip(sorted, indices):
+                cumulative_probability_lower_then_p = cumulative_probability < self.top_p
+                mask_update = torch.where(cumulative_probability_lower_then_p, index_layer, off)
+                mask_construction_indices.append(mask_update)
+                cumulative_probability += probabilities
+                if torch.all(cumulative_probability >= self.top_p):
+                    break
+
+            mask_indices = torch.stack(mask_construction_indices, dim=-1).unsqueeze(-1)
+            mask = mask_indices == torch.arange(self.native_ensemble_width)
+            mask = torch.any(mask, dim=-2)
+            configuration = configuration * mask
+            configuration = self.rebalance_probability(configuration)
+
+        return configuration
+    @torch.jit.unused
     @property
-    def configuration(self)->torch.Tensor:
+    def configuration(self):
         return self._configuration
 
     @torch.jit.export
-    def set_configuration(self, config: torch.Tensor, logit: bool = True, recursive: bool = True):
-        self.debug_bit += 1
+    def get_config(self)->torch.Tensor:
+        """
+        The get configuration function returns the current configuration.
+        """
+        # Due to torchscript not handling properties on modules
+        # we have to use an explicit getter and setter. Unfortunately.
+        return self._configuration
 
+    @torch.jit.export
+    def set_config(self, config: torch.Tensor, logits: bool = False, _trust: bool = False):
+        """
+        Set a logit as a configuration, with no fancy work
+        :param config: The configuration logit
+        :param logits: whether or not the input is a logit
+        """
+
+        # Do a few sanity checks.
         if not isinstance(config, torch.Tensor):
             raise ValueError("Configuration must be a tensor")
         if config.dim() < 2:
@@ -163,75 +247,51 @@ class EnsembleSpace(nn.Module):
         elif config.shape[-1] != self.native_ensemble_width:
             raise ValueError("Configuration last dimension bad. Expected %s, got %s"
                              % (self.native_ensemble_width, config.shape[-1]))
-        print(config)
 
-        #Handle conversion of config logit input into a usable format
-        if logit:
-            configuration = config.to(dtype=self.dtype)
-            configuration = torch.softmax(configuration, dim=-1)
-            if self.top_k is not None:
-                # Create the top k sparse configuration
-                #
-                # Do this by finding the top k indices, making
-                # a mask, then masking the configuration and performing
-                # the probabilistic change. Then we rebalance the probabilites
-                _, indices = torch.topk(configuration, self.top_k, dim=-1)
-                indices = indices.unsqueeze(-1)
-                mask = torch.arange(self.native_ensemble_width)
-                mask = indices == mask
-                mask = torch.any(mask, dim=-2)
-                configuration = configuration * mask
-                configuration = self.rebalance_probability(configuration)
-
-            elif self.top_p is not None:
-                ### Develop the top-p driven case
-                #
-                # This will consist of finding by cumulative sums the
-                # sorted layer at which we transition above the top
-                # p, then generating and applying a mask based on these
-                # indices.
-
-                #Extract the relevant indices in an efficient manner
-
-                configuration = torch.softmax(configuration, dim=-1)
-                sorted, indices = torch.sort(configuration, descending=True, dim=-1)
-
-                #Promote interesting dimension to front for zippiing
-                sorted = sorted.unsqueeze(0).transpose(0, -1).squeeze(-1)
-                indices = indices.unsqueeze(0).transpose(0, -1).squeeze(-1)
-
-                #Setup and extract indices
-                cumulative_probability = torch.zeros(configuration.shape[:-1])
-                mask_construction_indices: List[torch.Tensor] = []
-                off = torch.full(cumulative_probability.shape, -1)
-                for probabilities, index_layer in zip(sorted, indices):
-                    cumulative_probability_lower_then_p = cumulative_probability < self.top_p
-                    mask_update = torch.where(cumulative_probability_lower_then_p, index_layer, off)
-                    mask_construction_indices.append(mask_update)
-                    cumulative_probability += probabilities
-                    if torch.all(cumulative_probability >= self.top_p):
-                        break
-
-                mask_indices = torch.stack(mask_construction_indices, dim=-1).unsqueeze(-1)
-                mask = mask_indices == torch.arange(self.native_ensemble_width)
-                mask = torch.any(mask, dim=-2)
-                configuration = configuration*mask
-                configuration = self.rebalance_probability(configuration)
-                config = configuration
-
+        # Cast and process the config into a probability.
+        #
+        # Handle probability options such as top-p or top-k
+        config = config.to(dtype=self.dtype)
+        if logits:
+            config = torch.softmax(config, dim=-1)
+            config = self._process_config_options(config)
+        elif not _trust:
+            config = self._process_config_options(config)
         self._configuration = config
 
-        #handle recursive updating
+
+    @torch.jit.export
+    def set_all_config(self,
+                          config: torch.Tensor,
+                          logit: bool = True,
+                          recursive: Optional[bool] = None):
+        """
+        The set configuration method is designed t
+        :param config: The config to apply
+        :param logit: Whether the config is represented as a logit. Default is true
+        :param recursive: Whether the config should be applied recursively to child EnsembleSpaces.
+            Default is false
+        :return:
+        """
+
+        #Convert to defaults
+        if logit is None:
+            logit = True
+        else:
+            torch.jit.annotate(bool, logit)
+        if recursive is None:
+            recursive = False
+
+
+
+
+
+
+        #Recursively set subconfigs, if so demanded
         if recursive:
             for child in self.children():
-                if hasattr(child, "set_configuration"):
-                   child.set_configuration(config, False)
-
-    @configuration.setter
-    def configuration(self, config: torch.Tensor):
-        self.debug_bit += 1
-        recurse = self.recursive
-        self.set_configuration(config, True, recursive=recurse)
+                if hasattr(child, "set_configuration") and child.__class__.__name__ == self.__class__.__name__:
+                    child.set_configuration(config, False, True)
 
     def register_ensemble(self, name: str, attribute: Optional[Union[nn.Parameter, torch.Tensor]] = None):
         """
@@ -290,7 +350,7 @@ class EnsembleSpace(nn.Module):
         :return: The constructed attribute
         """
         #attribute: (ensemble_width, ..., dim1, dim0)
-        configuration = self.configuration #(..., ensemble_width)
+        configuration = self.get_config() #(..., ensemble_width)
         # In the case of a ensemble_width of 0, the ensemble is disabled
         # and should just return the kernel directly. This supports
         # simpler code using register ensemble
@@ -416,7 +476,7 @@ class EnsembleSpace(nn.Module):
         self.recursive = recursive
         if configuration is None:
             configuration = torch.softmax(torch.ones([1, ensemble_width], dtype=dtype), dim=-1)
-        self.configuration = configuration
+        self.set_config(configuration)
 
 class Utility:
     """ A place for utility methods to belong"""
