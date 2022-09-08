@@ -57,17 +57,16 @@ class test_Feedforward(unittest.TestCase):
         output = instance(test_tensor)
     def test_dynamics(self):
         """Test the ability of the layer to update the dynamic features"""
-        test_tensor = torch.randn([10, 20, 4, 16])
+        test_tensor = torch.randn([10, 4, 16])
         config = torch.randn([10, 20])
-        config2 = torch.randn([10, 20])
+        config2 = 1000*torch.randn([10, 20])
         instance = Attention.FeedForward(16, dynamics=20)
         instance = torch.jit.script(instance)
         print("debug", instance.get_debug())
-        assert hasattr(instance, "configuration")
-        instance.configuration = config
+        instance.set_configuration(config, True, True)
         print("debug", instance.get_debug())
         output1 = instance(test_tensor)
-        instance.configuration = config2
+        instance.set_configuration(config2, True, True)
         output2 = instance(test_tensor)
         self.assertTrue(torch.any(output1 != output2))
     def test_composite(self):

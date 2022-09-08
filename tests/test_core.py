@@ -69,22 +69,23 @@ class test_EnsembleSpace(unittest.TestCase):
         self.assertRaises(AttributeError, bad_dim_error)
     def test_configuration_assignment(self):
         """Tests that the configuration can be modified and assigned to without too much trouble"""
-        instance = src.supertransformerlib.Core.EnsembleSpace(10)
+        python_instance = src.supertransformerlib.Core.EnsembleSpace(10)
+        instance = torch.jit.script(python_instance)
         config_basic_good = torch.randn([5, 10])
         config_complex_good = torch.randn([12, 5, 10])
 
         config_primitive_bad = torch.randn([3, 5])
         config_moderate_bad = torch.randn([5, 4,20])
 
-        instance.configuration = config_basic_good
-        instance.configuration = config_complex_good
+        instance.set_config(config_basic_good)
+        instance.set_config(config_complex_good)
 
         def bad_config_type():
-            instance.configuration = 34
+            python_instance.set_config(34)
         def bad_config_primitive():
-            instance.configuration = config_primitive_bad
+            python_instance.set_config(config_primitive_bad)
         def bad_config_complex():
-            instance.configuration = config_moderate_bad
+            python_instance.set_config(config_moderate_bad)
 
         self.assertRaises(ValueError, bad_config_type)
         self.assertRaises(ValueError, bad_config_primitive)
@@ -116,7 +117,8 @@ class test_EnsembleSpace(unittest.TestCase):
             try:
                 instance = src.supertransformerlib.Core.EnsembleSpace(ensemble_width)
                 instance.register_ensemble("test", ensemble_value)
-                instance.configuration = config_value
+
+                instance.set_config(config_value)
                 output = instance.test
                 self.assertTrue(expected_final_shape == output.shape)
                 print(output.shape)
@@ -155,9 +157,8 @@ class test_EnsembleSpace(unittest.TestCase):
             config = case["config"]
             expectations = case["output"]
 
-            test = torch.softmax(config.clone(), dim=-1)
-            instance.configuration = config
             instance.register_ensemble("test", ensemble)
+            instance.set_config(config)
             test_result = instance.test
 
             diff = (test_result - expectations).abs()
@@ -171,7 +172,7 @@ class test_EnsembleSpace(unittest.TestCase):
         ensemble= torch.randn([ensemble_width, 5, 3,6, 10])
         config = torch.randn([12, 5, ensemble_width])
         instance = src.supertransformerlib.Core.EnsembleSpace(ensemble_width, k_num)
-        instance.configuration = config
+        instance.set_config(config)
         instance.register_ensemble("test", ensemble)
         instance.test
     def test_top_p(self):
@@ -182,7 +183,7 @@ class test_EnsembleSpace(unittest.TestCase):
         config = torch.randn([12, 5, ensemble_width])
         expected_shape = torch.Size([12, 5, 5, 3, 6, 10])
         instance = src.supertransformerlib.Core.EnsembleSpace(ensemble_width, top_p=top_p)
-        instance.configuration = config
+        instance.set_config(config)
         instance.register_ensemble("test", ensemble)
         test_result = instance.test
         self.assertTrue(expected_shape == test_result.shape)
@@ -204,11 +205,12 @@ class test_EnsembleSpace(unittest.TestCase):
 
             def forward(self, x: torch.Tensor)->torch.Tensor:
                 config = torch.randn([self.batch_fun, self.native_ensemble_width])
-                self.configuration = config
+                self.set_config(config)
                 return x + self.kernel
 
         instance = mockup()
         tensor = torch.randn([instance.batch_fun, instance.d_model])
+        assert hasattr(instance, "_configuration")
         instance = torch.jit.script(instance)
         instance(tensor)
 
@@ -229,7 +231,7 @@ class test_EnsembleSpace(unittest.TestCase):
 
             def forward(self, x: torch.Tensor)->torch.Tensor:
                 config = torch.randn([self.batch_fun, self.native_ensemble_width])
-                self.configuration = config
+                self.set_config(config)
                 return x + self.kernel
 
         instance = mockup()
