@@ -28,7 +28,7 @@ class buffer_mockup(src.supertransformerlib.Core.EnsembleSpace):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         config = torch.randn([self.batch_fun, self.native_ensemble_width])
-        self.configuration = config
+        self.set_config(config, True)
         return x + self.kernel
 
 
@@ -175,6 +175,8 @@ class test_EnsembleSpace(unittest.TestCase):
         instance.set_config(config)
         instance.register_ensemble("test", ensemble)
         instance.test
+        instance.set_top_k(4)
+        self.assertTrue(instance.get_top_k() == 4)
     def test_top_p(self):
         """Test the top p selection ability"""
         top_p = 0.7
@@ -205,7 +207,7 @@ class test_EnsembleSpace(unittest.TestCase):
 
             def forward(self, x: torch.Tensor)->torch.Tensor:
                 config = torch.randn([self.batch_fun, self.native_ensemble_width])
-                self.set_config(config)
+                self.set_config(config, True)
                 return x + self.kernel
 
         instance = mockup()
@@ -231,7 +233,7 @@ class test_EnsembleSpace(unittest.TestCase):
 
             def forward(self, x: torch.Tensor)->torch.Tensor:
                 config = torch.randn([self.batch_fun, self.native_ensemble_width])
-                self.set_config(config)
+                self.set_config(config, True)
                 return x + self.kernel
 
         instance = mockup()
@@ -256,7 +258,7 @@ class test_EnsembleSpace(unittest.TestCase):
 
             def forward(self, x: torch.Tensor)->torch.Tensor:
                 config = torch.randn([self.batch_fun, self.native_ensemble_width])
-                self.configuration = config
+                self.set_config(config, True)
                 return x + self.kernel
 
         instance = mockup()
@@ -299,9 +301,8 @@ class test_EnsembleSpace(unittest.TestCase):
         config = torch.randn([4, 5])
         instance = mockup()
         instance = torch.jit.script(instance)
-        instance.configuration = config
-    #TODO: Test set_configuration. Make sure to test under torchscript with nested layers.
-
+        instance.set_config(config, False)
+        self.assertTrue(torch.all(instance.get_config() == config))
 
 class testLinear(unittest.TestCase):
     """
@@ -405,15 +406,22 @@ class testLinear(unittest.TestCase):
         """Test whether or not it is the case that the dynamic ensembling system works"""
         test_tensor = torch.randn([30, 20, 20])
         layer = src.supertransformerlib.Core.Linear(20, 10, dynamics=2)
-        layer = torch.jit.script(layer)
+#        layer = torch.jit.script(layer)
 
         configuration_1 = torch.tensor([[0, 1]])
         configuration_2 = torch.randn([20, 2])
         configuration_3 = torch.randn([30, 20, 2])
+        configuration_4 = torch.randn([10, 30, 20, 2])
 
-        layer.configuration = configuration_1
-        layer(test_tensor)
-        layer.configuration = configuration_2
-        layer(test_tensor)
-        layer.configuration = configuration_3
-        layer(test_tensor)
+        layer.set_config(configuration_1)
+        output_1 = layer(test_tensor)
+        layer.set_config(configuration_2)
+        output_2 = layer(test_tensor)
+        layer.set_config(configuration_3)
+        output_3 = layer(test_tensor)
+        layer.set_config(configuration_4)
+        output_4 = layer(test_tensor)
+
+        self.assertTrue(torch.any(output_1 != output_2))
+        self.assertTrue(torch.any(output_1 != output_3))
+        self.assertTrue(output_1.shape != output_4.shape)

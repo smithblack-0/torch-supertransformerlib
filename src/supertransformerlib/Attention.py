@@ -32,7 +32,7 @@ def _dot_product_attention(
     return attn
 
 
-class FeedForward(Core.EnsembleSpace, Core.Utility):
+class FeedForward(nn.Module, Core.Utility):
     """
     A feedforward layer for attention purposes.
     As a subclass of EnsembleSpace, and being built using
@@ -63,7 +63,28 @@ class FeedForward(Core.EnsembleSpace, Core.Utility):
 
     --- configuration ---
 
+    Configuration can be performed in parallel
+    on all subentries using the set functions
+    set_config, set_top_k, and set_top_p
+
     """
+
+    @torch.jit.export
+    def set_config(self, config: torch.Tensor):
+        self.ff1.set_config(config)
+        self.ff2.set_config(config)
+
+    @torch.jit.export
+    def set_top_k(self, top_k: Optional[int]):
+        self.ff1.set_top_k(top_k)
+        self.ff2.set_top_k(top_k)
+
+    @torch.jit.export
+    def set_top_p(self, top_p: Optional[float]):
+        self.ff1.set_top_p(top_p)
+        self.ff2.set_top_p(top_p)
+
+
     def __init__(self,
                  d_model: int,
                  d_internal: int = 2048,
@@ -86,15 +107,9 @@ class FeedForward(Core.EnsembleSpace, Core.Utility):
         if dynamics is None:
             dynamics = 0
 
-        super().__init__(dynamics,
-                         top_k = top_k,
-                         top_p = top_p,
-                         configuration = config,
-                         recursive=True)
+        super().__init__()
 
         #Setup a few flags
-
-        self.set_acces_flag = False
 
         if parallelization is None:
             self.ff1 = Core.Linear(d_model, d_internal, dynamics=dynamics)

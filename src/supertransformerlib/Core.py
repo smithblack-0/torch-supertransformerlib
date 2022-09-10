@@ -13,8 +13,6 @@ from torch import nn
 from . import Glimpses
 
 
-
-
 class EnsembleSpace(nn.Module):
     """
     Purpose:
@@ -68,6 +66,12 @@ class EnsembleSpace(nn.Module):
     regarding additional dimensions, which will broadcast and
     then pushed onto the front dimensions of the returned kernel.
 
+    The last dimension of the configuration is treated as if
+    it contains weights by which to use to assemble the final
+    kernel. Notably, it is the case that there exists both
+    a logits and a probability mode, and the configuration
+    can be set using .set_config
+
     As an example, consider a registered kernel defined as a parameter of shape
     Parameter(10, 3, 5,20) with name "test_kernel". This has, naturally, an ensemble width of
     10. If you define the follow configurations with the following shapes :
@@ -86,6 +90,24 @@ class EnsembleSpace(nn.Module):
     Notice that only the last dimension is reduced, and the configuration is
     broadcast across the rest of the tensor. This allows, for example, batch
     dependent setup and processing.
+
+    ---- Tagging  ----
+
+    During the __init__ process, it is possible to define a list of
+    strings to associate with the layer. These strings are known as
+    tags, and can be used for sorting purposes or even for grouping
+    bunches of layers together.
+
+    ---- Grouping ----
+
+    It is possible to place multiple EnsembleSpace modules together into
+    a so called "group". A group is simply a group of EnsembleSpace layers
+    that are tied together in a so called "EnsembleGroup" object, and which
+    promise to have the same configuration and related properties in common
+    at the same time. Additionally, setting the associated property on the
+    group will update the properties on all members of a group.
+
+    A layer cannot belong to more than one group at a time.
 
     ---- Examples ----
 
@@ -149,8 +171,6 @@ class EnsembleSpace(nn.Module):
 
     ### Set and get configuration ###
 
-
-
     @staticmethod
     def rebalance_probability(tensor: torch.Tensor)->torch.Tensor:
         """Takes a tensor which consists of positive weights and turns it into something that sums up to one"""
@@ -167,13 +187,13 @@ class EnsembleSpace(nn.Module):
         """
 
 
-        if self.top_k is not None:
+        if self._top_k is not None:
             # Create the top k sparse configuration
             #
             # Do this by finding the top k indices, making
             # a mask, then masking the configuration and performing
             # the probabilistic change. Then we rebalance the probabilites
-            _, indices = torch.topk(configuration, self.top_k, dim=-1)
+            _, indices = torch.topk(configuration, self._top_k, dim=-1)
             indices = indices.unsqueeze(-1)
             mask = torch.arange(self.native_ensemble_width)
             mask = indices == mask
@@ -181,7 +201,7 @@ class EnsembleSpace(nn.Module):
             configuration = configuration * mask
             configuration = self.rebalance_probability(configuration)
 
-        elif self.top_p is not None:
+        elif self._top_p is not None:
             ### Develop the top-p driven case
             #
             # This will consist of finding by cumulative sums the
@@ -203,11 +223,11 @@ class EnsembleSpace(nn.Module):
             mask_construction_indices: List[torch.Tensor] = []
             off = torch.full(cumulative_probability.shape, -1)
             for probabilities, index_layer in zip(sorted, indices):
-                cumulative_probability_lower_then_p = cumulative_probability < self.top_p
+                cumulative_probability_lower_then_p = cumulative_probability < self._top_p
                 mask_update = torch.where(cumulative_probability_lower_then_p, index_layer, off)
                 mask_construction_indices.append(mask_update)
                 cumulative_probability += probabilities
-                if torch.all(cumulative_probability >= self.top_p):
+                if torch.all(cumulative_probability >= self._top_p):
                     break
 
             mask_indices = torch.stack(mask_construction_indices, dim=-1).unsqueeze(-1)
@@ -217,10 +237,6 @@ class EnsembleSpace(nn.Module):
             configuration = self.rebalance_probability(configuration)
 
         return configuration
-    @torch.jit.unused
-    @property
-    def configuration(self):
-        return self._configuration
 
     @torch.jit.export
     def get_config(self)->torch.Tensor:
@@ -232,7 +248,7 @@ class EnsembleSpace(nn.Module):
         return self._configuration
 
     @torch.jit.export
-    def set_config(self, config: torch.Tensor, logits: bool = False, _trust: bool = False):
+    def set_config(self, config: torch.Tensor, logits: bool = False):
         """
         Set a logit as a configuration, with no fancy work
         :param config: The configuration logit
@@ -254,44 +270,43 @@ class EnsembleSpace(nn.Module):
         config = config.to(dtype=self.dtype)
         if logits:
             config = torch.softmax(config, dim=-1)
-            config = self._process_config_options(config)
-        elif not _trust:
-            config = self._process_config_options(config)
+        config = self._process_config_options(config)
         self._configuration = config
 
+    #Set top p, set top k
 
-    @torch.jit.export
-    def set_all_config(self,
-                          config: torch.Tensor,
-                          logit: bool = True,
-                          recursive: Optional[bool] = None):
-        """
-        The set configuration method is designed t
-        :param config: The config to apply
-        :param logit: Whether the config is represented as a logit. Default is true
-        :param recursive: Whether the config should be applied recursively to child EnsembleSpaces.
-            Default is false
-        :return:
-        """
+    def set_top_p(self, top_p: Optional[float]):
+        if top_p is not None:
+            if not 0 <= top_p <= 1.0:
+                raise ValueError("Top_p is not between 0 and 1")
+            if self._top_k is not None:
+                self._top_k = None
+        self._top_p = top_p
 
-        #Convert to defaults
-        if logit is None:
-            logit = True
+    def get_top_p(self)-> Optional[float]:
+        return self._top_p
+
+    def set_top_k(self, top_k: Optional[int]):
+        if top_k is not None:
+            if top_k <= 0:
+                raise ValueError("Top k not greater than or equal to one")
+            if self._top_p is not None:
+                self._top_p = None
+            self._top_k = top_k
         else:
-            torch.jit.annotate(bool, logit)
-        if recursive is None:
-            recursive = False
+            self._top_k = None
+    def get_top_k(self)->Optional[int]:
+        return self._top_k
+
+    #### Grouping logic ###
+    #
+    # Grouping consists of tying
+    # together sets
 
 
 
 
-
-
-        #Recursively set subconfigs, if so demanded
-        if recursive:
-            for child in self.children():
-                if hasattr(child, "set_configuration") and child.__class__.__name__ == self.__class__.__name__:
-                    child.set_configuration(config, False, True)
+    #Registration logic.
 
     def register_ensemble(self, name: str, attribute: Optional[Union[nn.Parameter, torch.Tensor]] = None):
         """
@@ -413,20 +428,13 @@ class EnsembleSpace(nn.Module):
                 return super().__getattribute__(item)
             except AttributeError:
                 return self.__getattr__(item)
-    @torch.jit.export
-    def get_debug(self):
-        output: List[int] = [self.debug_bit]
-        for child in self.children():
-            if hasattr(child, "debug_bit"):
-                output.append(child.debug_bit)
 
-        return output
     def __init__(self,
                  ensemble_width: int,
                  top_k: Optional[int] = None,
                  top_p: Optional[float] = None,
                  configuration: Optional[torch.Tensor] = None,
-                 recursive: bool = False,
+                 tags: Optional[List[str]] = None,
                  sparse_epsilon=0.0001,
                  dtype: torch.dtype = torch.float32,
                  ):
@@ -445,21 +453,23 @@ class EnsembleSpace(nn.Module):
                         This engages sparse logic.
         :param configuration: Optional. A passed configuration
                         Must follow the configuration rules outlined above
-        :param recursive: A bool. Whether performing a configuration
-            set will recursively set the layers beneath.
         :param sparse_epsilon:
                     The configuration probability below which to exclude the
                     configuration as an option during ensemble construction.
 
                     0.0 disables
+        :param tags: Used with groups to narrow down what is captured and what is not.
         :param dtype: What to cast the configuration and kernels to.
         """
 
         if top_k is not None and top_p is not None:
             raise ValueError( "Cannot use both top-p and top-k at same time")
 
-        self.top_k = top_k
-        self.top_p = top_p
+        self._top_p = None
+        self._top_k = None
+
+        self.set_top_p(top_p)
+        self.set_top_k(top_k)
         self.sparse_epsilon = sparse_epsilon
         self.native_ensemble_width = ensemble_width
         self._registry: Dict[str, str] = {}
@@ -473,13 +483,20 @@ class EnsembleSpace(nn.Module):
         #later. We initialize it to a basic configuration compatible with the
         #problem.
 
-        self.recursive = recursive
+        if tags is None:
+            tags = []
+        self.tags = tags
+
         if configuration is None:
             configuration = torch.softmax(torch.ones([1, ensemble_width], dtype=dtype), dim=-1)
         self.set_config(configuration)
 
+
 class Utility:
     """ A place for utility methods to belong"""
+    def get_group(self, ensemble_width, ):
+        """"""
+
 
     def standardize_input(self, input: Union[torch.Tensor, List[int], int])->torch.Tensor:
         """
@@ -588,7 +605,6 @@ class Linear(Utility, EnsembleSpace):
                  use_bias: bool = True,
                  top_k: Optional[int] = None,
                  top_p: Optional[int] = None
-
                  ):
         """
 
