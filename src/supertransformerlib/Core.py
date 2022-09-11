@@ -249,20 +249,11 @@ class EnsembleSpace(nn.Module):
     This is used by the subclass to handle squirreling away ensembles.
     See it for details
 
-    --- update_configuration ---
+    --- update_config ---
 
-    This may be utilized to update the current
-    configuration. It will rebuild the kernels
-    using the valid config. the objects
-    being passed are Config objects, defined above.
-
-
-    ---- Tagging  ----
-
-    During the __init__ process, it is possible to define a list of
-    strings to associate with the layer. These strings are known as
-    tags, and can be used for sorting purposes or even for grouping
-    bunches of layers together.
+    One may define, then pass in, a new
+    configuration using this method. It is the case
+    that any
 
     ---- Examples ----
 
@@ -294,12 +285,11 @@ class EnsembleSpace(nn.Module):
             super().__init__(ensemble_width)
             bias_kernel = torch.zeros([ensemble_width, d_model])
             bias_kernel = nn.Parameter(bias_kernel)
-            self.bias_kernel = bias_kernel
-            self.register_ensemble("bias_kernel")
+            self.register_ensemble("bias_kernel", bias_kernel)
         def forward(self, tensor):
             # Note that the raw kernel would be 20 x 32, not the required 16x32
             # It MUST be rebuilding the kernel using the ensemble if this works.
-            kernel = self.bias_kernel
+            kernel = self.get_kernel("bias_kernel")
             return tensor + kernel
 
     class ConfigureThenAdd(nn.Module):
@@ -321,6 +311,8 @@ class EnsembleSpace(nn.Module):
     #Configuration logic
     @torch.jit.export
     def update_config(self, config: Config):
+        if config.ensemble_width != self.native_ensemble_width:
+            raise ValueError("Config ensemble width does not match natural ensemble width")
         self.config = config
 
     #Registration logic.
@@ -328,8 +320,7 @@ class EnsembleSpace(nn.Module):
         """
 
         Registers an attribute as an ensemble kernel tensor, or alternatively
-        as a standard tensor
-        Will automatically convert tensor to the datatype defined at init.
+        as a standard tensor. Will automatically convert tensor to the datatype defined at init.
 
         -- specifications --
         The attribute should be a tensor or a parameter.
@@ -363,7 +354,7 @@ class EnsembleSpace(nn.Module):
         self._ensemble_registry[name] = ensemble
 
     @torch.jit.export
-    def get_ensemble(self, name: str)->torch.Tensor:
+    def get_kernel(self, name: str)->torch.Tensor:
         """
         Gets the ensemble of the given name.
         Unfortunately, getattr redirection is not compatible
@@ -404,13 +395,6 @@ class EnsembleSpace(nn.Module):
         self.native_ensemble_width = ensemble_width
         self.dtype = dtype
         self.config = Config(torch.eye(ensemble_width, dtype=dtype))
-
-
-
-
-
-
-
 
 class Utility:
     """ A place for utility methods to belong"""
@@ -613,13 +597,13 @@ class Linear(Utility, EnsembleSpace):
         flattened_input = Glimpses.reshape(tensor,input_shape, row_length)
         flattened_input = flattened_input.unsqueeze(-1)
         if self.use_bias:
-            matrix_kernel = self.get_ensemble("matrix_kernel")
-            bias_kernel = self.get_ensemble("bias_kernel")
+            matrix_kernel = self.get_kernel("matrix_kernel")
+            bias_kernel = self.get_kernel("bias_kernel")
 
             flattened_output = torch.matmul(matrix_kernel, flattened_input).squeeze(-1)
             flattened_output = flattened_output + bias_kernel
         else:
-            matrix_kernel = self.get_ensemble("matrix_kernel")
+            matrix_kernel = self.get_kernel("matrix_kernel")
             flattened_output = torch.matmul(matrix_kernel, flattened_input)
         restored_output = Glimpses.reshape(flattened_output, column_length, output_shape)
         return restored_output

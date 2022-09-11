@@ -64,45 +64,30 @@ class FeedForward(nn.Module, Core.Utility):
     --- configuration ---
 
     Configuration can be performed in parallel
-    on all subentries using the set functions
-    set_config, set_top_k, and set_top_p
+    on all subentries using the set_config function.
 
     """
 
     @torch.jit.export
-    def set_config(self, config: torch.Tensor):
-        self.ff1.set_config(config)
-        self.ff2.set_config(config)
+    def set_config(self, config: Core.Config):
+        self.ff1.update_config(config)
+        self.ff2.update_config(config)
 
     @torch.jit.export
-    def set_top_k(self, top_k: Optional[int]):
-        self.ff1.set_top_k(top_k)
-        self.ff2.set_top_k(top_k)
-
-    @torch.jit.export
-    def set_top_p(self, top_p: Optional[float]):
-        self.ff1.set_top_p(top_p)
-        self.ff2.set_top_p(top_p)
-
+    def get_config(self)->Core.Config:
+        return self.ff1.config
 
     def __init__(self,
                  d_model: int,
                  d_internal: int = 2048,
                  parallelization: Optional[Union[torch.Tensor, List[int], int]] = None,
                  dynamics: Optional[int] = None,
-                 config: Optional[torch.Tensor] = None,
-                 top_k: Optional[int] = None,
-                 top_p: Optional[int] = None,
                  ):
         """
-
         :param d_model: The model width
         :param d_internal: The internel width. By default 2048
         :param parallelization: The parallization layers
         :param dynamics: The dynamic width. None means off.
-        :param config: The config
-        :param top_k: See EnsembleSpace topk
-        :param top_p: See EnsembleSpace top_[
         """
         if dynamics is None:
             dynamics = 0
@@ -142,8 +127,7 @@ class FeedForward(nn.Module, Core.Utility):
         tensor = tensor.unsqueeze(-2).transpose(0, -2).squeeze(0) #Transfer item back into position
         return tensor
 
-
-class MultiHeadedAttention(Core.EnsembleSpace, Core.Utility):
+class MultiHeadedAttention(nn.Module, Core.Utility):
     """
     A Multiheaded Attention layer capable of
     executing parallization alongside ensemble configured
@@ -172,41 +156,44 @@ class MultiHeadedAttention(Core.EnsembleSpace, Core.Utility):
     there are to choose from.
 
     """
-    @property
-    def configuration(self) ->torch.Tensor:
-        return super().configuration
 
+    @torch.jit.export
+    def set_config(self, config: Core.Config):
+        self.query_projector.update_config(config)
+        self.value_projector.update_config(config)
+        self.key_projector.update_config(config)
+        self.collapse_projector.update_config(config)
 
+    @torch.jit.export
+    def get_config(self)->Core.Config:
+        return self.query_projector.config
 
     def __init__(self,
                  d_query: int,
                  d_content: int,
                  d_output: int,
                  heads: int,
-                 ensembles: Optional[int] = None,
-                 ):
+                 parallelization: Optional[Union[torch.Tensor, List[int], int]] = None,
+                 dynamics: Optional[int] = None):
         """
 
         :param d_query: The dimensions of the query's embeddings
         :param d_content: The dimensions of the contents embedding
         :param d_output: The output embedding
-        :param heads: The number of heads
-        :param ensembles: Optional. The number of ensembles to construct.
-
+        :param heads: The number of heads to initialize the MHA with.
+        :param parallelization: How much, and in what shape, to parallelize. Static.
+        :param dynamics: Whether or not to setup extra kernelspace for dynamic configuration.
         """
+
         super().__init__()
+
         assert d_query % heads == 0
         head_width = d_query // heads
-        if ensembles is None:
-            ensembles = 1
-            self.ensembles = False
-        else:
-            self.ensembles = True
 
-        self.query_projector = Linear(d_query, [heads, head_width], ensembles)
-        self.key_projector = Linear(d_content, [heads, head_width], ensembles)
-        self.value_projector = Linear(d_content, [heads, head_width], ensembles)
-        self.collapse_projector = Linear([heads, head_width], d_output, ensembles)
+        self.query_projector = Core.Linear(d_query, [heads, head_width], parallel=parallelization, dynamics=dynamics)
+        self.key_projector = Core.Linear(d_content, [heads, head_width], parallel=parallelization, dynamics=dynamics)
+        self.value_projector = Core.Linear(d_content, [heads, head_width], parallel=parallelization, dynamics=dynamics)
+        self.collapse_projector = Core.Linear([heads, head_width], d_output, parallel=parallelization, dynamics=dynamics)
 
     def forward(self,
                 query: torch.Tensor,  # (..., (ensemble), item, embedding)
@@ -224,11 +211,6 @@ class MultiHeadedAttention(Core.EnsembleSpace, Core.Utility):
             """
 
         # Prep query, key and value
-
-        if self.ensembles is False:
-            query = query.unsqueeze(-3)  # (..., ensemble, items, embeddings)
-            key = key.unsqueeze(-3)
-            value = value.unsqueeze(-3)
 
         if mask is not None:
             mask = mask.unsqueeze(-3)  # (..., ensemble, items, content_items)
@@ -252,10 +234,7 @@ class MultiHeadedAttention(Core.EnsembleSpace, Core.Utility):
                                       mask)  # (...,head, ensemble, item, head_dim)
         attn = attn.transpose(-2, -4)  # (..., item, ensemble, head, head_widht)
         output = self.collapse_projector(attn)  # (..., item, ensemble, embedding)
-        if self.ensembles is False:
-            output = output.squeeze(-2)
-        else:
-            output = output.transpose(-2, -3)
+        output = output.transpose(-2, -3)
 
         return output
 

@@ -178,7 +178,7 @@ class parameter_mockup(src.supertransformerlib.Core.EnsembleSpace):
         kernel = nn.Parameter(torch.randn([5, 10, 3]))
         self.register_ensemble("kernel", kernel)
     def forward(self):
-        return self.get_ensemble("kernel")
+        return self.get_kernel("kernel")
 
 class tensor_mockup(src.supertransformerlib.Core.EnsembleSpace):
     def __init__(self):
@@ -186,7 +186,7 @@ class tensor_mockup(src.supertransformerlib.Core.EnsembleSpace):
         kernel = torch.randn([5, 10, 3])
         self.register_ensemble("kernel", kernel)
     def forward(self):
-        return self.get_ensemble("kernel")
+        return self.get_kernel("kernel")
 
 
 class test_EnsembleSpace(unittest.TestCase):
