@@ -4,7 +4,7 @@ import torch
 from torch import nn
 from typing import Union, Optional, List
 from src.supertransformerlib import Glimpses
-from src.supertransformerlib.Core import EnsembleSpace
+from src.supertransformerlib.Core import KernelSpace
 
 """
 --- Design ----
@@ -31,7 +31,7 @@ for the circumstances of each particular batch.
 """
 
 
-class Linear(EnsembleSpace):
+class Linear(KernelSpace):
     """
     A linear layer allowing a number of tricks to be deployed in parallel.
     These tricks are:
@@ -39,7 +39,7 @@ class Linear(EnsembleSpace):
     * Linear mapping
     * Autoreshaping
     * Parallel execution
-    * Dynamic Ensemble Assembly
+    * Dynamic Kernel Assembly
 
     Generally, the resolution order for a arbitrary tensor is
 
@@ -88,12 +88,12 @@ class Linear(EnsembleSpace):
     This has its greatest utility when designing independent ensembles. However,
     exchange of information has it's purpose. Which brings us to...
 
-    ---- Dynamic Ensemble Assembly ----
+    ---- Dynamic Kernel Assembly ----
 
     Although it is possible to create completely parallel tensor kernels, it is possible
     to do much more. Using the parallel attribute indicated above actually activates the
     dynamic ensemble mechanism built into the class. This mechanism allows correctly
-    defined specifications to create a EnsembleSpace of different Linear kernels, which
+    defined specifications to create a KernelSpace of different Linear kernels, which
     the program may then combine together for various purposes based on a Configuration
     attribute.
 
@@ -106,7 +106,7 @@ class Linear(EnsembleSpace):
 
     Would do the trick, by weighting each option equally. It is also possible to specify the configuration
     more directly. Any extra dimensions will pop out right before the batch info starts. See
-    EnsembleSpace for more details.
+    KernelSpace for more details.
     """
     def standardize_input(self, input: Union[torch.Tensor, List[int], int])->torch.Tensor:
         """

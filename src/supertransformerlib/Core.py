@@ -156,51 +156,115 @@ class Config():
                  top_k: Optional[int] = None,
                  top_p: Optional[float] = None,
                  logits: bool = True,
-                 dtype: torch.dtype = torch.float32
+                 dtype: torch.dtype = torch.float32,
+                 tags: Optional[List[str]] = None,
                  ):
+        """
+
+        :param config: The tensor, in logit format or otherwise, to turn into the config. Last dim is ensemble dim
+        :param top_k: Whether to use top-k, and how many to keep
+        :param top_p: Whether to use top-p, and how many to keep
+        :param logits: Whether this is a logit or probability
+        :param dtype: The dtype to make the config
+        :param tags: Any tags to include. If none, this is a generic config. If tags are included, only
+            configs with a matching tag will be updated. when passed into a kernelspace.
+        """
+
         self.ensemble_width = config.shape[-1]
         config = self.sanitize_config(config, logits, dtype)
         config = self._process_config_options(config, top_k, top_p)
         self.config = config
         self.dtype = dtype
+        self.tags = tags
 
     def __call__(self):
         return self.config
 
 
-class Ensemble(nn.Module):
+class Kernel(nn.Module):
     """
-    A small storage layer to an ensemble
-    in. When passed in valid configuration information,
-    it will spit out the assembled case
+    A small storage layer to a torch kernel of some
+    sort. The kernel may be an ensemble, in which case
+    a configuration must eventually be provided
+    to construct anything, or just a regular old
+    parameter.
+
+    The class will be captured when seen and provided
+    with configurations when updates go by.
+
+    By default, it will be setup as an ensemble that spits out the
+    same kernel it is given. It can then be further modified using update_config.
     """
     @property
     def ensemble_width(self):
         return self.kernel.shape[0]
-    def __init__(self,  kernel: torch.Tensor, is_ensemble: bool):
+
+    @torch.jit.export
+    def update_config(self, config: Config):
+        """
+        Update the given kernel with the given config.
         """
 
-        :param ensemble_width: The width of the
-        :param kernel:
-        :param is_ensemble:
-        """
+        #Temporary variables needed for torchscript to work right.
+        my_tags = self.tags
+        config_tags = config.tags
+        if torch.jit.isinstance(my_tags, List[str]) and torch.jit.isinstance(config_tags, List[str]):
+            #Finding if the two tag groups share an element is a great
+            #canidate for set. Unforunately, torchscript does not support it.
+            #so we are using a loop for now. Do not use too many tags I guess?
 
+
+            is_contained = False
+            for tag in my_tags:
+                if tag in config_tags:
+                    is_contained = True
+                    break
+            if not is_contained:
+                return None
+
+        if not self.is_ensemble:
+            raise ValueError("Attempt to set config on non ensemble kernel")
+        if config.ensemble_width != self.ensemble_width:
+            raise ValueError("Attempt to set config when config ensemble width does not match kernel width")
+        self.config = config
+
+    def __init__(self,
+                 kernel: torch.Tensor,
+                 is_ensemble: bool = True,
+                 tags: Optional[List[str]] = None,
+                 sparsity_exclusion: float = 0.001,
+                 dtype: torch.dtype = torch.float32):
+        """
+        :param kernel: The kernel to store away
+        :param is_ensemble: Whether or not this is an ensemble, or a standard kernel
+        :param dtype: the dtype to cast to.
+        :param sparsity_exclusion:
+            A parameter that controls how small a config entry should be before it is evaluated as sparse.
+        :param tags: Used to control when a config is applied. None means any passing config is applied.
+            If a list of strings is provided, only configs with one or more of the matching tags will be applied.
+
+        """
 
         super().__init__()
         if isinstance(kernel, nn.Parameter):
             self.register_parameter("kernel", kernel)
         else:
             self.register_buffer("kernel", kernel)
-        self.is_ensemble = is_ensemble
 
-    def forward(self, config: torch.Tensor, sparsity_exclusion: float = 0.001):
+        self.tags = tags
+        self.is_ensemble = is_ensemble
+        self.sparisty_exlusion = sparsity_exclusion
+        self.config = Config(torch.eye(self.ensemble_width, dtype=dtype))
+
+    def forward(self):
         kernel = self.kernel
+        kernel = kernel.to(self.config.dtype)
         if self.is_ensemble:
-            configuration = config
-            restoration_shape = torch.Size(list(config.shape[:-1]) + list(kernel.shape[1:]))
+            configuration = self.config.config
+            restoration_shape = torch.Size(list(configuration.shape[:-1]) + list(kernel.shape[1:]))
             kernel = kernel.flatten(1)
             configuration = configuration.flatten(0, -2)
-            configuration = configuration.masked_fill(configuration < sparsity_exclusion, 0.0)
+            configuration = configuration.masked_fill(configuration < self.sparisty_exlusion, 0.0)
             configuration = configuration.to_sparse()
             output = torch.sparse.mm(configuration, kernel)
             output = output.view(restoration_shape)
@@ -208,52 +272,32 @@ class Ensemble(nn.Module):
             output = kernel
         return output
 
-class EnsembleSpace(nn.Module):
+
+
+class _KernelSpace(nn.Module):
     """
-    Purpose:
+    This exists only to get
+    around certain torchscript limitations.
+    """
 
-    Dynamic assembly of the pieces of an ensemble into
-    the optimum option is the idea behind this class.
+class KernelSpace(_KernelSpace):
+    """
+    Being able to dynamically combine together kernels
+    into ensembles is the point of this class. It is
+    the case that one can use this, and the accompanying
+    kernel type, to easily and elegantly create an
+    environment in which configurations can act with
+    minimal annoyance to the programmer.
 
-    One may setup during init the expected ensemble
-    width along with assembly features such as
-    whether to use top-p or top-k. Then, at some
-    point along the line one can provide a configuration,
-    which is discussed more below.
+    After setup, kernels are caught as they
+    are assigned and registered against an internal registry.
+    They can then be retrieved using get_kernel, and the kernel
+    name.
 
-    Once all ensembles are registered, they may be used
-    transparently in normal logic in torch. It is the case
-    that when one goes to access something registered as
-    an ensemble, you get given the superimposed version of it.
+    While an ideal world would see the kernel retrievable the
+    same way it is assigned, torchscript has no idea about
+    __getattr__ making this impossible.
 
-    How the class actually works is that the configuration determines
-    which of the ensemble slices are most useful for the given problem.
-    These slices are then weighted by the configuration and added together.
-
-
-
-    --- init ---
-
-    Of importance for this dicussion, during the init
-    step one must set the ensemble_width. This sets the
-    instance expectations regarding the size of ensemble
-    kernels and the shape of the configuration.
-
-    One may at this point go with the default configuration,
-    or alternatively setup a top-k or top-p parameter situation.
-
-    Notably, an ensemble_length of 0 disables the forward logic.
-
-    --- register_ensemble ---
-
-    This is used by the subclass to handle squirreling away ensembles.
-    See it for details
-
-    --- update_config ---
-
-    One may define, then pass in, a new
-    configuration using this method. It is the case
-    that any
 
     ---- Examples ----
 
@@ -280,7 +324,7 @@ class EnsembleSpace(nn.Module):
     # Define the layers
 
 
-    class AddBias(Core.EnsembleSpace):
+    class AddBias(Core.KernelSpace):
         def __init__(self, ensemble_width, d_model):
             super().__init__(ensemble_width)
             bias_kernel = torch.zeros([ensemble_width, d_model])
@@ -308,93 +352,41 @@ class EnsembleSpace(nn.Module):
 
     ```
     """
-    #Configuration logic
-    @torch.jit.export
-    def update_config(self, config: Config):
-        if config.ensemble_width != self.native_ensemble_width:
-            raise ValueError("Config ensemble width does not match natural ensemble width")
-        self.config = config
-
-    #Registration logic.
-    def register(self, name: str, attribute: Optional[Union[nn.Parameter, torch.Tensor]] = None, is_ensemble=True):
-        """
-
-        Registers an attribute as an ensemble kernel tensor, or alternatively
-        as a standard tensor. Will automatically convert tensor to the datatype defined at init.
-
-        -- specifications --
-        The attribute should be a tensor or a parameter.
-        The attributes first dimension must equal the length of ensemble.
-        The attribute, when retrieved, will be returned according to configuration.
-
-        --- params ---
-        :param name: The name of the instance attribute
-        :param attribute: The attribute to be assigned. If already assigned on class, do not have to specify again
-        :param is_ensemble: Whether or not this should be an ensemble
-        """
-        #Sanity checks the attribute, then goes ahead and
-        #registers the attribute with the registry parameter
-
-        if not isinstance(attribute, torch.Tensor):
-            raise AttributeError("Ensemble attribute of name %s is not a tensor" % name)
-
-        if is_ensemble:
-            if attribute.dim() < 2:
-                raise AttributeError("Ensemble attribute of name %s must have an ensemble dimension" % name)
-            if attribute.shape[0] != self.native_ensemble_width:
-                raise AttributeError("Ensemble attribute of name %s had first dim of length %s, expecting %s" % (
-                    name,
-                    attribute.shape[0],
-                    self.native_ensemble_width
-                ))
-
-        #Build it. Store the current kernel, and the base.
-        attribute = attribute.to(self.dtype)
-        ensemble = Ensemble(attribute, is_ensemble)
-        self._ensemble_registry[name] = ensemble
+    # The actual responsibilities of this particular layer are actually
+    # extremely limited. Ultimately, all that it is responsible for doing
+    # is tracking down further sublayers to update when given particular
+    # parameters
 
     @torch.jit.export
-    def get_kernel(self, name: str)->torch.Tensor:
-        """
-        Gets the ensemble of the given name.
-        Unfortunately, getattr redirection is not compatible
-        with torchscript, requiring this to be utilized instead.
+    def update_children(self, config: Config):
+        """Updates the config for all immediate children"""
+        #This does a recursive search for kernels
+        #and sub kernelspaces. The kernelspaces see
+        #their update_config method called, causing recursion. The
+        #kernels will see their update config method called, updating
+        #the actual config
+        #
+        #Config is stored entirely on the kernels. This layer just
+        #tracks down where it should go.
+        for child in self.children():
+            if isinstance(child, Kernel):
+                if child.is_ensemble:
+                    child.update_config(config)
 
-        This is VERY annoying, but what else can I do...?
-        """
-        output = torch.zeros([0])
-        for key, ensemble in self._ensemble_registry.items():
-            if key == name:
-                output = ensemble(self.config.config)
+    @torch.jit.export
+    def update_descendents(self, config: Config):
+        """Updates my own children, along with all descendent kernelspace layers as well. """
+        for child in self.children():
+            if isinstance(child, Kernel):
+                child.update_config(config)
+            if hasattr(child, "_is_KernelSpace"): #We cannot use isinstance(child, KernelSpace) due to torchscript limitations.
+                child.update_descendents(config)
 
-        return output
 
-    def __init__(self,
-                 ensemble_width: int,
-                 sparse_epsilon=0.0001,
-                 dtype: torch.dtype = torch.float32,
-                 ):
-        """
-        :param ensemble_width: The width that the ensemble kernels will be.
-            * Must be provided
-            * Length of zero disables ensemble and just returns the kernel directly.
-        :param configuration: Optional. A passed configuration
-                        Must follow the configuration rules outlined above
-        :param sparse_epsilon:
-                    The configuration probability below which to exclude the
-                    configuration as an option during ensemble construction.
 
-                    0.0 disables
-        :param dtype: What to cast the configuration and kernels to.
-        """
-
+    def __init__(self):
         super().__init__()
-
-        self._ensemble_registry = nn.ModuleDict()
-        self.sparse_epsilon = sparse_epsilon
-        self.native_ensemble_width = ensemble_width
-        self.dtype = dtype
-        self.config = Config(torch.eye(ensemble_width, dtype=dtype))
+        self._is_KernelSpace = True
 
 class Utility:
     """ A place for utility methods to belong"""
@@ -414,8 +406,7 @@ class Utility:
         output = torch.tensor(input, dtype=torch.int64)
         return output
 
-
-class Linear(Utility, EnsembleSpace):
+class Linear(Utility, KernelSpace):
     """
     A linear layer allowing a number of tricks to be deployed in parallel.
     These tricks are:
@@ -423,7 +414,7 @@ class Linear(Utility, EnsembleSpace):
     * Linear mapping
     * Autoreshaping
     * Parallel execution
-    * Dynamic Ensemble Assembly
+    * Dynamic Kernel Assembly
 
     Generally, the resolution order for a arbitrary tensor is
 
@@ -472,12 +463,12 @@ class Linear(Utility, EnsembleSpace):
     This has its greatest utility when designing independent ensembles. However,
     exchange of information has it's purpose. Which brings us to...
 
-    ---- Dynamic Ensemble Assembly ----
+    ---- Dynamic Kernel Assembly ----
 
     Although it is possible to create completely parallel tensor kernels, it is possible
     to do much more. Using the parallel attribute indicated above actually activates the
     dynamic ensemble mechanism built into the class. This mechanism allows correctly
-    defined specifications to create a EnsembleSpace of different Linear kernels, which
+    defined specifications to create a KernelSpace of different Linear kernels, which
     the program may then combine together for various purposes based on a Configuration
     attribute.
 
@@ -490,7 +481,7 @@ class Linear(Utility, EnsembleSpace):
 
     Would do the trick, by weighting each option equally. It is also possible to specify the configuration
     more directly. Any extra dimensions will pop out right before the batch info starts. See
-    EnsembleSpace for more details.
+    KernelSpace for more details.
 
     ---- Combination ----
 
@@ -498,6 +489,9 @@ class Linear(Utility, EnsembleSpace):
     from right to left, is first the autoshaping specifications, then the parallelization, and finally the
     dynamic specifications.
 
+    --- configuration ---
+
+    set_config will configure everything properly
 
     """
 
@@ -507,14 +501,16 @@ class Linear(Utility, EnsembleSpace):
                  parallel: Optional[Union[torch.Tensor, List[int], int]] = None,
                  dynamics: Optional[int] = None,
                  use_bias: bool = True,
-                 dtype: torch.dtype = torch.float32,
+                 tags: Optional[List[str]] = None,
                  ):
         """
 
         :param input_shape: The shape of the input
         :param output_shape: The shape of the output
         :param parallel: What parallel portions of the kernel to create
+        :param dynamics: If defined, what the dynamics width is.
         :param use_bias: Whether or not to use bias on the linear layer
+        :param tags: Any tags to restrict config updates to. Passed on to our kernels.
         """
 
         #Peform standardization
@@ -561,17 +557,19 @@ class Linear(Utility, EnsembleSpace):
             is_ensembled = False
 
 
-        super().__init__(ensemble_width, dtype=dtype)
+        super().__init__()
 
         #Generate actual kernels
 
         matrix_kernel = torch.empty(matrix_shape.tolist())
         torch.nn.init.kaiming_uniform_(matrix_kernel, math.sqrt(5))
         matrix_kernel = nn.Parameter(matrix_kernel)
+        matrix_kernel = Kernel(matrix_kernel, is_ensembled)
 
         if use_bias:
             bias_kernel = torch.zeros(bias_shape.tolist())
             bias_kernel = nn.Parameter(bias_kernel)
+            bias_kernel = Kernel(bias_kernel, is_ensembled)
 
         #Register kernels and deployment details
 
@@ -581,9 +579,9 @@ class Linear(Utility, EnsembleSpace):
         self.input_map_reference = input_autoshape_mapping
         self.output_map_reference = output_autoshape_mapping
 
-        self.register("matrix_kernel", matrix_kernel, is_ensembled)
+        self.matrix_kernel = matrix_kernel
         if use_bias:
-            self.register("bias_kernel", bias_kernel, is_ensembled)
+            self.bias_kernel = bias_kernel
 
     def forward(self, tensor: torch.Tensor):
 
@@ -597,14 +595,10 @@ class Linear(Utility, EnsembleSpace):
         flattened_input = Glimpses.reshape(tensor,input_shape, row_length)
         flattened_input = flattened_input.unsqueeze(-1)
         if self.use_bias:
-            matrix_kernel = self.get_kernel("matrix_kernel")
-            bias_kernel = self.get_kernel("bias_kernel")
-
-            flattened_output = torch.matmul(matrix_kernel, flattened_input).squeeze(-1)
-            flattened_output = flattened_output + bias_kernel
+            flattened_output = torch.matmul(self.matrix_kernel(), flattened_input).squeeze(-1)
+            flattened_output = flattened_output + self.bias_kernel()
         else:
-            matrix_kernel = self.get_kernel("matrix_kernel")
-            flattened_output = torch.matmul(matrix_kernel, flattened_input)
+            flattened_output = torch.matmul(self.matrix_kernel(), flattened_input)
         restored_output = Glimpses.reshape(flattened_output, column_length, output_shape)
         return restored_output
 

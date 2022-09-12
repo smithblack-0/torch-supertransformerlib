@@ -32,10 +32,10 @@ def _dot_product_attention(
     return attn
 
 
-class FeedForward(nn.Module, Core.Utility):
+class FeedForward(Core.KernelSpace):
     """
     A feedforward layer for attention purposes.
-    As a subclass of EnsembleSpace, and being built using
+    As a subclass of KernelSpace, and being built using
     core linear layers, it supports the operations of
     parallel execution along with ensemblelike configuration.
 
@@ -61,21 +61,15 @@ class FeedForward(nn.Module, Core.Utility):
     can be utilized to reconfigure the ensemble and, if so, how many ensembles
     there are to choose from.
 
-    --- configuration ---
+    --- config ---
 
-    Configuration can be performed in parallel
-    on all subentries using the set_config function.
-
+    set_config can be used to set all the configurations properly and without issue.
     """
 
     @torch.jit.export
     def set_config(self, config: Core.Config):
-        self.ff1.update_config(config)
-        self.ff2.update_config(config)
-
-    @torch.jit.export
-    def get_config(self)->Core.Config:
-        return self.ff1.config
+        """Set the current config"""
+        self.update_descendents(config)
 
     def __init__(self,
                  d_model: int,
@@ -127,7 +121,7 @@ class FeedForward(nn.Module, Core.Utility):
         tensor = tensor.unsqueeze(-2).transpose(0, -2).squeeze(0) #Transfer item back into position
         return tensor
 
-class MultiHeadedAttention(nn.Module, Core.Utility):
+class MultiHeadedAttention(Core.KernelSpace, Core.Utility):
     """
     A Multiheaded Attention layer capable of
     executing parallization alongside ensemble configured
@@ -159,14 +153,7 @@ class MultiHeadedAttention(nn.Module, Core.Utility):
 
     @torch.jit.export
     def set_config(self, config: Core.Config):
-        self.query_projector.update_config(config)
-        self.value_projector.update_config(config)
-        self.key_projector.update_config(config)
-        self.collapse_projector.update_config(config)
-
-    @torch.jit.export
-    def get_config(self)->Core.Config:
-        return self.query_projector.config
+        self.update_descendents(config)
 
     def __init__(self,
                  d_query: int,
@@ -196,64 +183,55 @@ class MultiHeadedAttention(nn.Module, Core.Utility):
         self.collapse_projector = Core.Linear([heads, head_width], d_output, parallel=parallelization, dynamics=dynamics)
 
     def forward(self,
-                query: torch.Tensor,  # (..., (ensemble), item, embedding)
-                key: torch.Tensor,  # (...., (ensemble), item, embedding)
-                value: torch.Tensor,  # (..., (ensemble), item, embedding)
+                query: torch.Tensor,
+                key: torch.Tensor,
+                value: torch.Tensor,
                 mask: Optional[torch.Tensor] = None) -> torch.Tensor:
         """
 
 
-            :param query: The query. Of shape (..., (ensemble), items, embedding)
-            :param key: The key, Of shape (..., (ensemble), content_items, embedding)
-            :param value: The value. Of shape, (..., (ensemble), content_items, embedding)
-            :param mask: A bool mask. True masks. Optional. Of shape (..., (ensemble), items, content_items)
-            :return: tensor. Attention result
-            """
+        :param query: The query. Of shape (...,(dynamic), (...parallel), items, embedding)
+        :param key: The key, Of shape (..., (dynamic), (...parallel), content_items, embedding)
+        :param value: The value. Of shape, (..., (dynamic), (...parallel), content_items, embedding)
+        :param mask: A bool mask. True masks. Optional. Of shape (..., (ensemble), items, content_items)
+        :return: tensor. Attention result
+        """
 
-        # Prep query, key and value
+        # Perform head generation
 
-        if mask is not None:
-            mask = mask.unsqueeze(-3)  # (..., ensemble, items, content_items)
+        query = query.unsqueeze(0).transpose(-2, 0).squeeze(-2) #(item, (dynamics), (..parallel), embedding)
+        key = key.unsqueeze(0).transpose(-2, 0).squeeze(-2) # #(item, (dynamics), (..parallel), embedding)
+        value = value.unsqueeze(0).transpose(-2, 0).squeeze(-2)  #(item, (dynamics), (..parallel), embedding)
 
-        query = query.transpose(-2, -3)  # (..., item, ensemble, content_items)
-        key = key.transpose(-2, -3)
-        value = value.transpose(-2, -3)
+        headed_query = self.query_projector(query)  # (item ..., (dynamics), (..parallel), head, head_dim)
+        headed_key = self.key_projector(key)  # (item ..., (dynamics), (..parallel), head, head_dim)
+        headed_value = self.value_projector(value)  # (item ..., (dynamics), (..parallel), head, head_dim)
 
-        headed_query = self.query_projector(query)  # (..., item, ensemble, head, head_dim)
-        headed_key = self.key_projector(key)  # (..., item_b, ensemble, head, head_dim)
-        headed_value = self.value_projector(value)  # (..., item_b, ensemble, head, head_dim)
+        headed_query = headed_query.unsqueeze(-2).transpose(0, -2).squeeze(0) #  ..., (dynamics), (..parallel), head, item, head_dim)
+        headed_key = headed_key.unsqueeze(-2).transpose(0, -2).squeeze(0) #  ..., (dynamics), (..parallel), head, item, head_dim)
+        headed_value = headed_value.unsqueeze(-2).transpose(0, -2).squeeze(0) #  ..., (dynamics), (..parallel), head, item, head_dim)
 
-        headed_query = headed_query.transpose(-2, -4)  # (..., head, ensemble, item, head_dim)
-        headed_key = headed_key.transpose(-2, -4)  # (..., head, ensemble, item2, head_dim)
-        headed_value = headed_value.transpose(-2, -4)  # (..., head, ensemble, item2, head_dim)
-
-        if mask is not None:
-            mask = mask.unsqueeze(-4)
-
+        #Do dot product attention
         attn = _dot_product_attention(headed_query, headed_key, headed_value,
-                                      mask)  # (...,head, ensemble, item, head_dim)
-        attn = attn.transpose(-2, -4)  # (..., item, ensemble, head, head_widht)
-        output = self.collapse_projector(attn)  # (..., item, ensemble, embedding)
-        output = output.transpose(-2, -3)
+                                      mask)  # (...,(dynamics),(..parallel), head, item, head_dim)
+
+        #Reduce heads. Return
+        attn = attn.unsqueeze(0).transpose(-2, 0).squeeze(-2)  #(item,...,(dynamics),(..parallel), head, head_dim)
+        output = self.collapse_projector(attn)  #(item,...,(dynamics),(..parallel), embedding)
+        output = output.unsqueeze(-2).transpose(-2, 0).squeeze(0)#(...,(dynamics),(..parallel), item, embedding)
 
         return output
 
 
-class PIMU(nn.Module):
+class PIMU(Core.KernelSpace, Core.Utility):
     """
     Parameter Injection Memory Unit. (PIMU)
 
     Parameter Memory are large blocks of parameters
-    which are compatible with an embedded stream
-    as though they are embeddings themselves.
-
-    The process of Parameter Injection is a process
-    of conditionally injecting whole blocks of parameters,
-    into a running embedded stream as though it were an
-    embedding itself. Two tasks exist. First, the module
-    must figure out what parameter block to inject, and
-    when. Second, the module must train the parameter
-    blocks to provide useful context.
+    which act as if they are a key or value embedding,
+    and are run by a given query. This means that all
+    sorts of memorized context can be embedded within
+    such a block.
 
     The location of best effect for parameter injection
     is within a model of some sort that is mapping many
@@ -271,41 +249,55 @@ class PIMU(nn.Module):
     model down.
 
     """
+    @torch.jit.export
+    def set_config(self, config: Core.Config):
+        self.update_descendents(config)
+
 
     def __init__(self,
                  d_model: int,
                  mem_width: int,
                  heads: int,
-                 ensembles: Optional[int] = None,
+                 parallelization: Optional[Union[torch.Tensor, List[int], int]] = None,
+                 dynamics: Optional[int] = None,
                  ):
         """
 
         :param d_model: The embedding width. An int
         :param mem_width: The memory width. An int. Increases parameters
         :param heads: The number of heads to use
-        :param ensembles: How many ensembles to set up. If none, dimension is disabled.
+        :param parallelization: What tensor dimensions are static, and should be handled separately for each layer.
+        :param dynamics: If defined, how many units wide the dynamics kernel should be.
         """
         super().__init__()
 
         assert d_model % heads == 0
 
         head_channel_width = d_model // heads
-        if ensembles is None:
-            key = torch.zeros([heads, mem_width, head_channel_width])
-            value = torch.zeros([heads, mem_width, head_channel_width])
-            self.ensembles = False
+        #Construct kernel shape
+
+        kernel_shape: List[int] = []
+        kernel_shape = [heads, mem_width, head_channel_width] + kernel_shape
+
+        if parallelization is not None:
+            parallelization = self.standardize_input(parallelization)
+            kernel_shape = parallelization.tolist() + kernel_shape
+        if dynamics is not None:
+            using_dynamics = True
+            kernel_shape = [dynamics] + kernel_shape
         else:
-            key = torch.zeros([ensembles, heads, mem_width, head_channel_width])
-            value = torch.zeros([ensembles, heads, mem_width, head_channel_width])
-            self.ensembles = True
+            using_dynamics = False
+
+        key = torch.zeros(kernel_shape)
+        value = torch.zeros(kernel_shape)
 
         nn.init.kaiming_uniform_(key)
         nn.init.kaiming_uniform_(value)
 
-        self.QueryProj = Linear(d_model, [heads, head_channel_width], ensembles)
-        self.Key = nn.Parameter(key)
-        self.Value = nn.Parameter(value)
-        self.DeheadProj = Linear([heads, head_channel_width], d_model, ensembles)
+        self.QueryProj = Core.Linear(d_model, [heads, head_channel_width], parallelization, dynamics)
+        self.Key = Core.Kernel(nn.Parameter(key), using_dynamics)
+        self.Value = Core.Kernel(nn.Parameter(value), using_dynamics)
+        self.DeheadProj = Core.Linear([heads, head_channel_width], d_model, parallelization, dynamics)
 
     def forward(self, query: torch.Tensor) -> torch.Tensor:
         """
@@ -313,35 +305,27 @@ class PIMU(nn.Module):
         :return: The calibrated result of the query.
         """
 
-        # query : (..., (ensemble), items, embedding_width)
-        if self.ensembles:
-            query = query.transpose(-2, -3)  # (..., items, ensemble, embedding_width
+        #Perform head generation
 
-        # Get key, value, and query prepped
+        query = query.unsqueeze(0).transpose(-2, 0).squeeze(-2) #(item, (dynamics), (..parallel), embedding)
+        query = self.QueryProj(query)
+        query = query.unsqueeze(-2).transpose(-2, 0).squeeze(0)
 
-        query = self.QueryProj(query)  # (..., items,  (ensemble), head,  head_embedding)
-        key = self.Key  # ((ensemble),  head, mem, head_embedding)
-        value = self.Value  # (ensemble), head, mem, head_embedding)
+        key = self.Key()
+        value = self.Value()
 
-        if self.ensembles:
-            query = query.transpose(-4, -2).transpose(-4, -3)  # (..., ensemble, head, items, head_embed)
-        else:
-            query = query.transpose(-3, -2)  # (..., head, items, head_embed)
+        #Perform dot product attention=
 
-        # Perform scoring and attention
+        attn = _dot_product_attention(query, key, value)  #
 
-        attn = _dot_product_attention(query, key, value)  # (..., (ensemble), head, items, head_embedding)
-        if self.ensembles:
-            attn = attn.transpose(-2, -3).transpose(-3, -4)  # (...,  items, ensemble, head, head_dim)
-        else:
-            attn = attn.transpose(-2, -3)  # (..., items, head, head_dim)
-        output = self.DeheadProj(attn)  # (... items, (ensemble), output_dim)
-        if self.ensembles:
-            output = output.transpose(-2, -3)  # (..., ensemble, items, embed_dim)
+        #Collapse heads, then return
+        attn = attn.unsqueeze(0).transpose(-2, 0).squeeze(-2)  #(item,...,(dynamics),(..parallel), head, head_dim)
+        output = self.DeheadProj(attn)
+        output = output.unsqueeze(-2).transpose(-2, 0).squeeze(0)
         return output
 
 
-class PISU(nn.Module):
+class PISU(Core.KernelSpace, Core.Utility):
     """
     Parameter Injected Summary Unit (PISU)
 
@@ -358,20 +342,21 @@ class PISU(nn.Module):
     allow more degrees of freedom, while fewer will allow less.
     """
 
+
     def __init__(self,
                  d_model: int,
                  d_output: int,
                  output_items: int,
                  heads: int,
-                 ensembles: Optional[int] = None
+                 parallelization: Optional[Union[torch.Tensor, List[int], int]] = None,
+                 dynamics: Optional[int] = None,
                  ):
         """
-
-
-        :param d_model: The embeddings width
-        :param output_items: How many distinct the output should ha
+        :param d_model: The embeddings width. Dim -1
+        :param output_items: How many distinct items the output should have. Dim -2.
         :param heads: How many heads should exist
-        :param ensembles: The number of distinct ensembles.
+        :param parallelization: The number of parallel kernels to manufacture
+        :param dynamics: If used, how big to make the dynamics kernel.
         """
 
         super().__init__()
@@ -541,7 +526,7 @@ class LCSA(nn.Module):
 class EESA(nn.Module):
     """
 
-    Ensemble Exchange Self Attention (EESA)
+    Kernel Exchange Self Attention (EESA)
 
     Allows different ensembles to exchange information,
     while constraining available parameters among lower level units.

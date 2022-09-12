@@ -11,7 +11,7 @@ import src.supertransformerlib.Core
 # These must be located at the top level so pickle
 # is happy
 
-class buffer_mockup(src.supertransformerlib.Core.EnsembleSpace):
+class buffer_mockup(src.supertransformerlib.Core.KernelSpace):
     """
     Dynamically varying kernel
     Simple task: add
@@ -88,10 +88,11 @@ class test_Config(TestKit):
         if torch.any(test):
             raise AssertionError("Probabilities for top-p configuration did not add up to one")
 
-class test_Ensemble(TestKit):
+class test_Kernel(TestKit):
     """
-    Test the ability of the ensemble layer to
-    put together a working kernel from a variety of different configuration situations
+    Test the ability of the kernel layer to
+    put together a working kernel, store the configuration, and
+    be updated later on.
     """
     def test_ensemble_auto(self):
         """Test the ability to load a defined ensemble given a variety of configurations"""
@@ -117,13 +118,15 @@ class test_Ensemble(TestKit):
             (ensemble_name, ensemble_value), (config_name, config_value) = case
             expected_final_shape = torch.Size([*config_value.shape[:-1], *ensemble_value.shape[1:]])
             try:
-                instance = src.supertransformerlib.Core.Ensemble(ensemble_width, ensemble_value)
-                instance = torch.jit.script(instance)
+                kernel = src.supertransformerlib.Core.Kernel(ensemble_value)
+                kernel = torch.jit.script(kernel)
 
                 config = src.supertransformerlib.Core.Config(config_value)
-                config_tensor = config.config
+                config = torch.jit.script(config)
 
-                final_kernel = instance(config_tensor)
+                kernel.update_config(config)
+
+                final_kernel = kernel()
                 self.assertTrue(final_kernel.shape == expected_final_shape)
 
             except Exception as err:
@@ -161,133 +164,126 @@ class test_Ensemble(TestKit):
             expectations = case["output"]
 
             config = src.supertransformerlib.Core.Config(config, logits=False)
-            instance = src.supertransformerlib.Core.Ensemble(2, ensemble)
-            instance = torch.jit.script(instance)
-
-            test_result = instance(config.config)
+            kernel = src.supertransformerlib.Core.Kernel(ensemble)
+            kernel = torch.jit.script(kernel)
+            kernel.update_config(config)
+            test_result = kernel()
 
             diff = (test_result - expectations).abs()
             passed = torch.all(epsilion > diff)
             self.assertTrue(passed)
+    def test_tag_restriction(self):
+        """Test that tag restrictions are respected"""
+        kernel_restricted = src.supertransformerlib.Core.Kernel(nn.Parameter(torch.randn([20, 10, 5])), tags=["a", "b"])
+        kernel_restricted = torch.jit.script(kernel_restricted)
+
+        #Generic is applied correctly
+        config = src.supertransformerlib.Core.Config(torch.randn([10, 20]))
+        kernel_restricted.update_config(config)
+        output = kernel_restricted()
+        self.assertTrue(output.shape == torch.Size([10, 10, 5]))
+
+        #When a non included tag pops up, no update occurs
+        config = src.supertransformerlib.Core.Config(torch.randn([5, 20]), tags=["c"])
+        kernel_restricted.update_config(config)
+        output = kernel_restricted()
+        self.assertTrue(output.shape == torch.Size([10, 10, 5]))
+
+        #When an included tag is detected, it does cause an update
+        config = src.supertransformerlib.Core.Config(torch.randn([3, 20]), tags=["a"])
+        kernel_restricted.update_config(config)
+        output = kernel_restricted()
+        self.assertTrue(output.shape == torch.Size([3, 10, 5]))
+
+
 
 #Fixtures. Must be top level for pickle to handle
 
-class parameter_mockup(src.supertransformerlib.Core.EnsembleSpace):
+
+class mockup(src.supertransformerlib.Core.KernelSpace):
     def __init__(self):
-        super().__init__(5)
-        kernel = nn.Parameter(torch.randn([5, 10, 3]))
-        self.register_ensemble("kernel", kernel)
-    def forward(self):
-        return self.get_kernel("kernel")
+        super().__init__()
+        self.kernel = src.supertransformerlib.Core.Kernel(nn.Parameter(torch.randn([10, 20, 30])))
 
-class tensor_mockup(src.supertransformerlib.Core.EnsembleSpace):
+    def forward(self):
+        return self.kernel()
+
+
+class mockup2(src.supertransformerlib.Core.KernelSpace):
     def __init__(self):
-        super().__init__(5)
-        kernel = torch.randn([5, 10, 3])
-        self.register_ensemble("kernel", kernel)
+        super().__init__()
+        self.kernel = src.supertransformerlib.Core.Kernel(nn.Parameter(torch.randn([10, 20, 30])))
+        self.kernel2 = mockup()
+
     def forward(self):
-        return self.get_kernel("kernel")
+        return self.kernel(), self.kernel2()
 
 
-class test_EnsembleSpace(unittest.TestCase):
+class test_KernelSpace(unittest.TestCase):
     """
-    Test suite for the ensemble space. Tests
-    ability to save, load, and modify
-    the configuration and the ensemble.
+    Test suite for the kernelSpace.
+
+    Test we can subclass successfully
+    and assign new configurations,
+    even in nested environments.
     """
-    def test_ensemble_registration(self):
-        """ Test the ability to register kernels as ensemble features. """
-
-
-
-        #Test the parameter registration system
-        instance = parameter_mockup()
-        instance = torch.jit.script(instance)
-        output = instance()
-        self.assertTrue(output.shape == torch.Size([5, 10, 3]))
-
-        #Test the buffer registration system
-        buffer_instance = tensor_mockup()
-        buffer_instance = torch.jit.script(instance)
-        output = buffer_instance()
-        self.assertTrue(output.shape == torch.Size([5, 10, 3]))
-
-        #Test that save and load works properly.
-
-    def test_alter_config(self):
+    def test_kernel_accumulation(self):
         """
-        Test that altering the config will actually
-        alter the output
+        Test that we can properly detect and modify
+        the kernels
         """
 
-        instance = parameter_mockup()
-        instance = torch.jit.script(instance)
-        config = src.supertransformerlib.Core.Config(torch.randn([10, 20, 5]))
-        instance.update_config(config)
-        output = instance()
-        self.assertTrue(output.shape == torch.Size([10, 20, 10, 3]))
 
+        config = src.supertransformerlib.Core.Config(torch.randn([30, 10]))
+
+        instance = mockup()
+        instance = torch.jit.script(instance)
+        instance.update_children(config)
+        output = instance()
+
+        self.assertTrue(output.shape == torch.Size([30, 20, 30]))
+    def test_nested_kernel_updates(self):
+
+
+        config = src.supertransformerlib.Core.Config(torch.randn([30, 10]))
+
+        instance = mockup2()
+        instance = torch.jit.script(instance)
+        instance.update_descendents(config)
+        output1, output2 = instance()
+
+        self.assertTrue(output1.shape == torch.Size([30, 20, 30]))
+        self.assertTrue(output2.shape == torch.Size([30, 20, 30]))
+        print(output1.shape, output2.shape)
 
 
     def test_saving_loading(self):
+        """Test that it is the case that an instance can be saved, and loaded, properly """
 
+        config = src.supertransformerlib.Core.Config(torch.randn([30, 10]))
 
-        #parameter test: Torchscript version
-        instance = parameter_mockup()
-        instance = torch.jit.script(instance)
-        original = instance()
-        torch.jit.save(instance, "test_save.raw")
-        loaded = torch.jit.load("test_save.raw")
-        final = loaded()
-        self.assertTrue(torch.all(original == final))
+        python_instance = mockup2()
+        torchscript_instance = torch.jit.script(python_instance)
 
-        #parameter test: standard version
-        instance = parameter_mockup()
-        original = instance()
-        torch.save(instance, "test_save.raw")
-        loaded = torch.load("test_save.raw")
-        final = loaded()
-        self.assertTrue(torch.all(original == final))
+        python_instance.update_descendents(config)
+        torchscript_instance.update_descendents(config)
 
-        #buffer test: script version
+        python_initial_output1, python_initial_output2 = python_instance()
+        torchscript_initial_output1, torchscript_initial_output2 = torchscript_instance()
 
-        instance = tensor_mockup()
-        instance = torch.jit.script(instance)
-        original = instance()
-        torch.jit.save(instance, "test_save.raw")
-        loaded = torch.jit.load("test_save.raw")
-        final = loaded()
-        self.assertTrue(torch.all(original == final))
+        torch.save(python_instance, "python_test_save.raw")
+        python_instance = torch.load("python_test_save.raw")
 
-        #parameter test: standard version
-        instance = tensor_mockup()
-        original = instance()
-        torch.save(instance, "test_save.raw")
-        loaded = torch.load("test_save.raw")
-        final = loaded()
-        self.assertTrue(torch.all(original == final))
+        torch.jit.save(torchscript_instance, "torchscript_save.raw")
+        torchscript_instance = torch.jit.load("torchscript_save.raw")
 
-        #Is config retained?
+        python_final1, python_final2 = python_instance()
+        torchscript_final1, torchscript_final2 = torchscript_instance()
 
-        config = src.supertransformerlib.Core.Config(torch.randn([10, 20, 5]))
-        instance = parameter_mockup()
-        instance.update_config(config)
-        original = instance()
-        torch.save(instance, "test_save.raw")
-        loaded = torch.load("test_save.raw")
-        final = loaded()
-        self.assertTrue(torch.all(original==final))
-
-        config = src.supertransformerlib.Core.Config(torch.randn([10, 20, 5]))
-        instance = parameter_mockup()
-        instance = torch.jit.script(instance)
-        instance.update_config(config)
-        original = instance()
-        torch.jit.save(instance, "test_save.raw")
-        loaded = torch.jit.load("test_save.raw")
-        final = loaded()
-        self.assertTrue(torch.all(original==final))
-
+        self.assertTrue(torch.all(python_initial_output1 == python_final1))
+        self.assertTrue(torch.all(python_initial_output2 == python_final2))
+        self.assertTrue(torch.all(torchscript_initial_output1 == torchscript_final1))
+        self.assertTrue(torch.all(torchscript_initial_output2 == torchscript_final2))
 
 
 class testLinear(unittest.TestCase):
@@ -389,3 +385,12 @@ class testLinear(unittest.TestCase):
         # Perform test
         scripted = torch.jit.script(test_script)
         scripted(test_tensor)
+    def test_dynamics(self):
+        """Test whether or not dynamic assignment works."""
+        test_tensor = torch.randn([30, 20, 20])
+        test_config = src.supertransformerlib.Core.Config(torch.randn([30, 10]))
+        test_layer = src.supertransformerlib.Core.Linear([20,20], 10, dynamics=10)
+        test_layer = torch.jit.script(test_layer)
+        test_layer.update_descendents(test_config)
+        output = test_layer(test_tensor)
+        self.assertTrue(output.shape == torch.Size([30, 10]))

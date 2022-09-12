@@ -115,34 +115,15 @@ class test_MultiHeadedAttention(unittest.TestCase):
         attn = layer(query, content, content, mask)
         self.assertTrue(shape_equal([3, 5, 10, 32], attn.shape))
 
-    def test_ensemble_capable(self):
+    def test_parallel_capable(self):
         """ Tests whether the class functions correctly when provided an ensemble"""
         query = torch.randn([3,5,10, 64])
         content = torch.randn([3, 5, 30, 16])
         mask = torch.randn([10, 30]) > 0.5
-        layer = Attention.MultiHeadedAttention(64, 16, 32, 4, 5)
+        layer = Attention.MultiHeadedAttention(64, 16, 32, 4, [3,5])
         attn = layer(query, content, content, mask)
         self.assertTrue(shape_equal([3, 5, 10, 32], attn.shape))
 
-    def test_ensemble_independence(self):
-        """ Tests whether the class processes ensemble channels independently"""
-        query = torch.randn([3,5,10, 64])
-        content = torch.randn([3, 5, 30, 16])
-
-        mask = torch.randn([10, 30]) > 0.5
-        layer = Attention.MultiHeadedAttention(64, 16, 32, 4, 5)
-        attn = layer(query, content, content, mask)
-
-        query_update = torch.randn([3, 1, 10, 64])
-        content_update = torch.randn([3, 1, 30, 16])
-
-        query_update = torch.concat([query[:, :-1], query_update], dim=-3)
-        content_update= torch.concat([content[:, :-1], content_update], dim=-3)
-        update_attn = layer(query_update, content_update, content_update, mask)
-
-        test_a_vals = attn[:, :-1]
-        test_b_vals = update_attn[:, :-1]
-        self.assertTrue(torch.all(test_a_vals == test_b_vals))
 
     def test_torchscript_compile(self):
         """ Tests that MHA works when torchscript compiled."""
@@ -178,8 +159,6 @@ class test_MultiHeadedAttention(unittest.TestCase):
 class test_PIMU(unittest.TestCase):
     """
     Test case for the PIMU class.
-
-
     """
     def test_basic(self):
         """ Test whether a basic PIMU instance works."""
@@ -189,12 +168,14 @@ class test_PIMU(unittest.TestCase):
         injected = layer(query)
         injected_shape = torch.tensor(injected.shape)
         self.assertTrue(torch.all(shape == injected_shape))
+
     def test_ensemble(self):
         """ Test whether an ensembled PIMU instance works."""
         query = torch.randn([3, 5, 10, 32])
         layer = Attention.PIMU(32, 10, 4, 5)
         injected = layer(query)
         self.assertTrue(shape_equal([3, 5, 10, 32], injected.shape))
+
     def test_torchscript_compile(self):
         """ Tests whether torchscript compiles on the layer"""
         query = torch.randn([3, 5, 10, 32])
@@ -250,7 +231,7 @@ class test_PISU(unittest.TestCase):
 class test_EESA(unittest.TestCase):
     """
 
-    Unit test for the Ensemble Exchange Self Attention
+    Unit test for the Kernel Exchange Self Attention
     layer.
 
     """
