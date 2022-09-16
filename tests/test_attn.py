@@ -206,7 +206,7 @@ class test_PISU(unittest.TestCase):
     def test_ensemble(self):
         """ Test whether the ensembled PISU instance works"""
         query = torch.randn([3,5, 10, 32])
-        layer = Attention.PISU(32, 16, 20, 4, 5)
+        layer = Attention.PISU(32, 16, 20, 4, [3,5])
         summary = layer(query)
         self.assertTrue(shape_equal([3, 5, 20, 16], summary.shape))
 
@@ -227,47 +227,6 @@ class test_PISU(unittest.TestCase):
         summary = layer(query)
 
 
-
-class test_EESA(unittest.TestCase):
-    """
-
-    Unit test for the Kernel Exchange Self Attention
-    layer.
-
-    """
-    def test_basic(self):
-        """ test whether any random tensor makes it through"""
-        ensembles, items, heads, d_model = (5, 10, 8, 32)
-
-        query = torch.randn([3, ensembles, items, d_model])
-        layer = Attention.EESA(d_model, heads, ensembles)
-        output = layer(query)
-        self.assertTrue(shape_equal(output.shape, [3, ensembles, items, d_model]))
-    def test_masking(self):
-        """ test whether the masking function is working properly,
-         such that the mask is preventing peering ahead. """
-        ensembles, items, heads, d_model = (5, 10, 8, 32)
-
-        query_primary = torch.randn([3, ensembles, items, d_model])
-        update = torch.zeros([3,1, items, d_model])
-        query_update = torch.concat([query_primary[:, :-1], update], dim=-3)
-
-        layer = Attention.EESA(d_model, heads, ensembles)
-        output_a = layer(query_primary)
-        output_b = layer(query_update)
-
-        difference = output_a - output_b
-        test_bool = torch.all(difference[:, :-1] < 0.001)
-        self.assertTrue(test_bool)
-    def test_torchscript(self):
-        """ Test that torchscript can compile the layer"""
-        ensembles, items, heads, d_model = (5, 10, 8, 32)
-
-        query = torch.randn([3, ensembles, items, d_model])
-        layer = Attention.EESA(d_model, heads, ensembles)
-        layer = torch.jit.script(layer)
-        output = layer(query)
-        self.assertTrue(shape_equal(output.shape, [3, ensembles, items, d_model]))
 
 class test_LCSA(unittest.TestCase):
     """
