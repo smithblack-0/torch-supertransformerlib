@@ -256,41 +256,5 @@ class test_LCSA(unittest.TestCase):
         self.assertTrue(shape_equal([3, 5, 10, 32], local_conditioning.shape))
 
 
-class test_GSPU(unittest.TestCase):
-    """
-    Test fixture for the Global Strategic Processing Unit.
-
-    """
-    def test_basic(self):
-        """ Test if it runs without any bells or whistles"""
-        query = torch.randn([3, 5, 10, 32])
-        layer = Attention.GSPU(32, 32, 10, 8, 8)
-        output = layer(query)
-        self.assertTrue(shape_equal(output.shape, [3, 5, 10, 32]))
-    def test_ensemble(self):
-        """ Test if it works when using an ensemble"""
-        query  = torch.randn([3, 5, 10, 32])
-        layer = Attention.GSPU(32, 16, 10, 8, 4, ensembles=5)
-        output = layer(query)
-        self.assertTrue(shape_equal(output.shape, [3, 5, 10, 32]))
-    def test_with_sublayers(self):
-        """ Test if it works when provided a few sublayers """
-
-        sublayers = [Attention.FeedForward(16, 128, 5), Attention.FeedForward(16, 128, 5)]
-        query = torch.randn([3, 5, 10, 32])
-        layer = Attention.GSPU(32, 16, 10, 8, 4, layers =sublayers, ensembles=5)
-        output = layer(query)
-        self.assertTrue(shape_equal(output.shape, [3, 5, 10, 32]))
-    def test_torchscript(self):
-        """ Test if it will compile to torchscript"""
-
-        sublayers = [Attention.FeedForward(16, 128, 5), Attention.FeedForward(16, 128, 5)]
-        query = torch.randn([3, 5, 10, 32])
-        layer = Attention.GSPU(32, 16, 10, 8, 4, layers =sublayers, ensembles=5)
-        layer = torch.jit.script(layer)
-        output = layer(query)
-
-        self.assertTrue(shape_equal(output.shape, [3, 5, 10, 32]))
-
 if __name__ == '__main__':
     unittest.main()
