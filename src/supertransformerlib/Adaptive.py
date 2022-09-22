@@ -57,6 +57,7 @@ Adaptive_Accumulator = namedtuple(
 )
 
 
+
 class Adaptive_Attention(Core.KernelSpace):
     """
     A very special variety of attention mechanism, this
@@ -123,7 +124,7 @@ class Adaptive_Attention(Core.KernelSpace):
         #Confidence projectors
 
         self.confidence_query_projector = Core.Linear(d_query, [heads, d_confidence], parallelization, dynamics)
-        self.confidence_key_projector = Core.Linear(d_key, [heads, d_assembly], parallelization, dynamics)
+        self.confidence_key_projector = Core.Linear(d_key, [heads, d_confidence], parallelization, dynamics)
 
         #Assembly projectors
 
@@ -132,8 +133,7 @@ class Adaptive_Attention(Core.KernelSpace):
 
         #Value and deheading projectors.
 
-        self.value_projection = Core.Linear(d_value, [heads, d_head], parallelization, dynamics)
-        self.deheader = Core.Linear([heads, d_head], d_query, parallelization, dynamics)
+        self.value_projection = Core.Linear(d_value, [heads, d_value])
 
     def make_attn_heads(self, query, key, value):
         query = query.unsqueeze(0).transpose(-2, 0).squeeze(-2)  # (item, (dynamics), (..parallel), embedding)
@@ -233,12 +233,10 @@ class Adaptive_Attention(Core.KernelSpace):
 
         #Run attention. Then assemble headed return.
 
-        attn = torch.matmul(score*confidence, value) #(..., head, query, d_head)
-        attn = attn.unsqueeze(0).transpose(0, -2).squeeze(-2)
-        attn = attn*assembly_weights
-        output_update = self.deheader(attn)
-        output_update = output_update.unsqueeze(-2).transpose(0, -2).squeeze(0)
-
+        attn = torch.matmul(score*confidence, attn_value) #(..., head, query, d_value)
+        attn = attn.unsqueeze(0).transpose(0, -1).squeeze(-1) #(d_value, ..., head, query)
+        output_update = (attn*assembly_weights).sum(dim=-2)
+        output_update = output_update.unsqueeze(-1).transpose(0, -1).squeeze(0)
         #Run updates. Return new accumulator
 
         halting_probabilities = accumulator.Halting_Probabilities + halting_probability_update
@@ -246,6 +244,23 @@ class Adaptive_Attention(Core.KernelSpace):
         output = accumulator.Output + output_update
 
         return Adaptive_Accumulator(halting_probabilities, residuals, output)
+
+
+class Adaptive_Focus():
+    """
+    A collection of functions which can
+    be utilized to control the view of a
+    particular batch so as to only
+    work on unhalted queries and batches.
+    """
+
+    def restrict(self,
+                 accumulator: Adaptive_Accumulator,
+                 mask: torch.Tensor) -> Adaptive_Accumulator:
+
+    def update(self,
+               original_accumulator: Adaptive_Accumulator,
+               update_accumulator: Adaptive_Accumulator) -> Adaptive_Accumulator:
 
 
 class Calculate_Trash_Update(Core.KernelSpace):
