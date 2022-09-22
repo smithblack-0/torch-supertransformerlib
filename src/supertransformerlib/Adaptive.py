@@ -32,6 +32,7 @@ from typing import Optional, Union, List, Tuple
 
 import torch
 from torch import nn
+from collections import namedtuple
 from dataclasses import dataclass
 
 from . import Core
@@ -42,7 +43,18 @@ def is_fully_halted(halting_probability: torch.Tensor, halting_epsilon = 0.001)-
     return torch.all(halting_probability > 1 -halting_epsilon)
 
 def get_unhalted_batchmesh(halting_probability: torch.Tensor):
+    pass
 
+
+Adaptive_Accumulator = namedtuple(
+    "Adaptive_Accumulator",
+    [
+        "Halting_Probabilities",
+        "Residuals",
+        "Output"
+    ]
+
+)
 
 class Adaptive_Attention(Core.KernelSpace):
     """
@@ -65,9 +77,23 @@ class Adaptive_Attention(Core.KernelSpace):
     provided next round.
     """
 
+    @torch.jit.export
+    def start_accumulator(self, query, key, value)->Adaptive_Accumulator:
+        """
+        Given a query, key, and value starts a compatible accumulator for catching
+        outputs and residuals.
+        """
+
+        halting_probabilities = torch.zeros(query.shape[:-1])
+        residuals = torch.zeros(query.shape[:-1])
+        output = torch.zeros(list(query.shape[:-1]) + [value.shape([-1])])
+
+        return Adaptive_Accumulator(halting_probabilities, residuals, output)
+
     def __init__(self,
                  d_query: int,
-                 d_content: int,
+                 d_key: int,
+                 d_value: int,
                  d_aggression: int,
                  d_assembly: int,
                  heads: int = 4,
@@ -79,21 +105,21 @@ class Adaptive_Attention(Core.KernelSpace):
 
         #Attention projectors
         self.attn_query_projector = Core.Linear(d_query, [heads, d_head], parallelization, dynamics)
-        self.attn_key_projector = Core.Linear(d_content, [heads, d_head], parallelization, dynamics)
+        self.attn_key_projector = Core.Linear(d_key, [heads, d_head], parallelization, dynamics)
 
         #Aggression projectors
 
         self.aggression_query_projector = Core.Linear(d_query, [heads, d_aggression], parallelization, dynamics)
-        self.aggression_key_projector = Core.Linear(d_content, [heads, d_assembly], parallelization, dynamics)
+        self.aggression_key_projector = Core.Linear(d_key, [heads, d_assembly], parallelization, dynamics)
 
         #Assembly projectors
 
         self.assembly_query_projector = Core.Linear(d_query, [heads, d_assembly], parallelization, dynamics)
-        self.assembly_key_projector = Core.Linear(d_content, [heads, d_assembly], parallelization, dynamics)
+        self.assembly_key_projector = Core.Linear(d_key, [heads, d_assembly], parallelization, dynamics)
 
         #Value and deheading projectors.
 
-        self.value_projection = Core.Linear(d_content, [heads, d_head], parallelization, dynamics)
+        self.value_projection = Core.Linear(d_value, [heads, d_head], parallelization, dynamics)
         self.deheader = Core.Linear([heads, d_head], d_query, parallelization, dynamics)
 
     def make_attn_heads(self, query, key, value):
@@ -136,12 +162,12 @@ class Adaptive_Attention(Core.KernelSpace):
         return query, key
 
     def forward(self,
+                accumulator: Adaptive_Accumulator,
                 query: torch.Tensor,
                 key: torch.Tensor,
                 value: torch.Tensor,
-                halting_probs: Optional[torch.Tensor],
                 mask: Optional[torch.Tensor] = None,
-                ):
+                )->Adaptive_Accumulator:
 
         #Generate the heads
 
@@ -173,10 +199,10 @@ class Adaptive_Attention(Core.KernelSpace):
         raw_halting_probability_update = score*confidence*assembly_weights.unsqueeze(-1) #(...head, query, content)
         raw_halting_probability_update = raw_halting_probability_update.sum(-3).sum(-1) #(..., query)
 
-        raw_new_halting_probability = raw_halting_probability_update + halting_probs
+        raw_new_halting_probability = raw_halting_probability_update + accumulator.Halting_Probabilities
         requires_adjustment = raw_new_halting_probability > 1 - 0.001 #(..., query)
         requires_adjustment = torch.logical_and(requires_adjustment,  raw_new_halting_probability != 1.0)
-        clamp_adjustment = ((1-halting_probs)/(raw_halting_probability_update + 1e-12)) #(..., query)
+        clamp_adjustment = ((1-accumulator.Halting_Probabilities)/(raw_halting_probability_update + 1e-12)) #(..., query)
 
         score = torch.where(
             requires_adjustment.unsqueeze(-2).unsqueeze(-1),
@@ -197,13 +223,16 @@ class Adaptive_Attention(Core.KernelSpace):
         attn = torch.matmul(score*confidence, value) #(..., head, query, d_head)
         attn = attn.unsqueeze(0).transpose(0, -2).squeeze(-2)
         attn = attn*assembly_weights
-        output = self.deheader(attn)
-        output = output.unsqueeze(-2).transpose(0, -2).squeeze(0)
+        output_update = self.deheader(attn)
+        output_update = output_update.unsqueeze(-2).transpose(0, -2).squeeze(0)
 
-        #Run updates. Return refined properties
+        #Run updates. Return new accumulator
 
-        return halting_probability_update, residuals_update, output
+        halting_probabilities = accumulator.Halting_Probabilities + halting_probability_update
+        residuals = accumulator.Residuals + residuals_update
+        output = accumulator.Output + output_update
 
+        return Adaptive_Accumulator(halting_probabilities, residuals, output)
 
 
 class Calculate_Trash_Update(Core.KernelSpace):
