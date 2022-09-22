@@ -56,6 +56,7 @@ Adaptive_Accumulator = namedtuple(
 
 )
 
+
 class Adaptive_Attention(Core.KernelSpace):
     """
     A very special variety of attention mechanism, this
@@ -86,7 +87,7 @@ class Adaptive_Attention(Core.KernelSpace):
 
         halting_probabilities = torch.zeros(query.shape[:-1])
         residuals = torch.zeros(query.shape[:-1])
-        output = torch.zeros(list(query.shape[:-1]) + [value.shape([-1])])
+        output = torch.zeros(list(query.shape[:-1]) + [value.shape[-1]])
 
         return Adaptive_Accumulator(halting_probabilities, residuals, output)
 
@@ -94,11 +95,23 @@ class Adaptive_Attention(Core.KernelSpace):
                  d_query: int,
                  d_key: int,
                  d_value: int,
-                 d_aggression: int,
+                 d_confidence: int,
                  d_assembly: int,
                  heads: int = 4,
                  parallelization: Optional[Union[torch.Tensor, List[int], int]] = None,
                  dynamics: Optional[int] = None):
+        """
+
+        :param d_query: The query embedding width
+        :param d_key: The key embedding width
+        :param d_value: The value embedding width
+        :param d_confidence: Internal. How much embedding to dedicate to confidence
+        :param d_assembly: Internal. How much embedding to dedicate to assembly
+        :param heads: The number of heads.
+        :param parallelization:
+        :param dynamics:
+        """
+
         super().__init__()
 
         d_head = d_query // heads
@@ -107,10 +120,10 @@ class Adaptive_Attention(Core.KernelSpace):
         self.attn_query_projector = Core.Linear(d_query, [heads, d_head], parallelization, dynamics)
         self.attn_key_projector = Core.Linear(d_key, [heads, d_head], parallelization, dynamics)
 
-        #Aggression projectors
+        #Confidence projectors
 
-        self.aggression_query_projector = Core.Linear(d_query, [heads, d_aggression], parallelization, dynamics)
-        self.aggression_key_projector = Core.Linear(d_key, [heads, d_assembly], parallelization, dynamics)
+        self.confidence_query_projector = Core.Linear(d_query, [heads, d_confidence], parallelization, dynamics)
+        self.confidence_key_projector = Core.Linear(d_key, [heads, d_assembly], parallelization, dynamics)
 
         #Assembly projectors
 
@@ -141,8 +154,8 @@ class Adaptive_Attention(Core.KernelSpace):
         query = query.unsqueeze(0).transpose(-2, 0).squeeze(-2)  # (item, (dynamics), (..parallel), embedding)
         key = key.unsqueeze(0).transpose(-2, 0).squeeze(-2)  # #(item, (dynamics), (..parallel), embedding)
 
-        query = self.aggression_query_projector(query)
-        key = self.aggression_key_projector(key)
+        query = self.confidence_query_projector(query)
+        key = self.confidence_key_projector(key)
 
         query = query.unsqueeze(0).transpose(-2, 0).squeeze(-2)  # (item, (dynamics), (..parallel), embedding)
         key = key.unsqueeze(0).transpose(-2, 0).squeeze(-2)  # #(item, (dynamics), (..parallel), embedding)
@@ -172,13 +185,13 @@ class Adaptive_Attention(Core.KernelSpace):
         #Generate the heads
 
         attn_query, attn_key, attn_value = self.make_attn_heads(query, key, value)
-        aggression_query, aggression_key = self.make_confidence_heads(query, key)
+        confidence_query, confidence_key = self.make_confidence_heads(query, key)
         assembly_query, assembly_key = self.make_assembly_heads(query, key)
 
         #Begin working towards attention
 
         attn_logits = torch.matmul(attn_query, attn_key.transpose(-1, -2))
-        confidence_logits = torch.matmul(aggression_query, aggression_key.transpose(-1, -2))
+        confidence_logits = torch.matmul(confidence_query, confidence_key.transpose(-1, -2))
         assembly_logits = torch.matmul(assembly_query, assembly_key.transpose(-1, -2))
         if mask is not None:
             attn_logits = attn_logits.masked_fill(mask, -1e+8)
@@ -318,60 +331,6 @@ class Calculate_Trash_Update(Core.KernelSpace):
 #Compound state manipulation.
 
 
-class Calculate_State_Update(Core.KernelSpace):
-    """
-    A class for calculating the critical updates
-    to the state when so called upon.
-    """
-
-    def __init__(self,
-                 d_model: int,
-                 d_resource: int,
-                 heads: int,
-                 parallelization: Optional[Union[torch.Tensor, List[int], int]] = None,
-                 dynamics: Optional[int] = None):
-
-        super().__init__()
-        #Question Generation
-
-        self.Questioner = Attention.MultiHeadedAttention(
-            d_model + d_model,
-            d_model,
-            d_resource,
-            heads,
-            parallelization,
-            dynamics
-        )
-        self.Update_Resolver = Core.Linear(
-            d_model+d_resource+d_resource,
-            d_model,
-            parallelization,
-            dynamics,
-        )
-        self.normalizer = nn.LayerNorm(d_model)
-
-    def forward(self, resource: TextResourceManager, state: torch.Tensor, query: torch.Tensor):
-
-        #query: (batch, items, embedding)
-        #state: (batch, state, embedding)
-
-        last_state = state[..., -1, :]
-        question = torch.concat([last_state, query], dim=-1)
-        question = question.unsqueeze(-1)
-        question = self.Questioner(question, state, state)
-
-        answer = resource(question)
-
-        update = torch.concat([last_state, question, answer], dim=-2)
-        update = self.Update_Resolver(update)
-        update = self.normalizer(update+last_state)
-        return update
-
-### Intercommunication ###
-
-class Generate_Keys()
-
-
 ### Dataflow. ####
 
 class Output_Accumulator:
@@ -459,180 +418,7 @@ class Adaptive_Stateful_Decoder(Core.KernelSpace):
         return output
 
 
-    def run_adaptive_update(self,
-                resource: TextResourceManager,
-                query: torch.Tensor,
-                output_accumulator: Output_Accumulator,
-                state_accumulator: State_Accumulator):
-
-        unhalted_map = self.generate_unhalted_mesh(output_accumulator.output_probabilities)
-        restricted_output = output_accumulator.restrict(unhalted_map)
-        restricted_state = state_accumulator.restrict(unhalted_map)
-
-        #Perform the state update.
-        state_update = self.state_update(resource, restricted_state.state, query)
-        keys = self.generate_keys(state_update, state_accumulator.state)
-        state_update = self.transformer(state_update, keys, output_accumulator.output)
-
-        #Run updates for the various probabilities in the restricted region.
-        trash_update, trash_residual = self.trash_update(restricted_state.trash_probabilities,
-                                                         restricted_state.state,
-                                                         state_update)
-        halting_update, halting_residual, output_update = self.output_update(restricted_output.output_probabilities,
-                                                                             restricted_state.state,
-                                                                             state_update)
 
 
-
-
-    def __init__(self,
-                 state_update: Calculate_State_Update,
-                 trash_update: Calculate_Trash_Update,
-                 output_update: Calculate_Output_Update,
-                 ):
-
-        self.state_update = state_update
-        self.trash_update = trash_update
-        self.output_update = output_update
-
-
-
-
-
-
-
-
-
-
-class State_Engine():
-    """
-    The purpose of this class is to track
-    the current state and provide efficient
-    state information when called upon.
-
-    # Responsibilities
-
-    * Display current output
-    * Display current keys
-    * Display whether fully halted
-    * On requested, return unhalted parameters
-    * On request, run a state update.
-    * Do not update parameters which are unchanging.
-    * Perform refresh, to get ready for another generation pass with the same state.
-
-    """
-    def get_unhalted_mesh(self):
-        """
-        Develops a meshgrid index set capable of mapping the unhalted
-        elements.
-        """
-
-        cumulative_probs = self.halting_probs.sum(dim=-1)
-        unhalted = cumulative_probs < 1.0
-        unhalted = unhalted.flatten()
-        index = torch.arange(unhalted.shape[-1]).masked_select(unhalted)
-
-
-        mesh = torch.meshgrid(*[torch.arange(elem) for elem in cumulative_probs.shape])
-        mesh = torch.stack(mesh, dim=-1)
-        mesh = mesh.flatten(0, -2)
-
-        output = mesh[index, :]
-        return output.unbind(-1)
-
-    def get_details(self)->Tuple[torch.tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-        """
-        Gets the active round status elements.
-        :returns:
-        * state: The state. The first entry contains the trashcan.
-        * halting_probs: The current halting probs.
-        * trash_probs: The current trash probs.
-        """
-
-        #Filter out the halted cases
-
-        mesh = self.get_unhalted_mesh()
-        state = self.state[mesh]
-        halting_probs = self.halting_probs[mesh]
-        trash_probs = self.trash_probs[mesh]
-
-        #Generate the trash can. Mask the trashed state embeddings. Merge in any prior state trashcan.
-
-        trashcan = (state*(1+self.trash_epsilon - trash_probs.unsqueeze(-1))).sum(dim=-2).unsqueeze(dim=-2)
-        state = state*(1-trash_probs.unsqueeze(-1))
-        trashcan = self.trashcan + trashcan
-
-        #Append the trashcan to the very front of the state, and update probs to reflect it
-
-        prob_shape = list(halting_probs.shape)
-        prob_shape[-1] = 1
-        state = torch.concat([trashcan, state], dim=-2)
-        halting_probs = torch.concat([torch.zeros(prob_shape), halting_probs], dim=-1)
-        trash_probs = torch.concat([torch.zeros(prob_shape), trash_probs], dim=-1)
-
-        #Return
-
-        return state, halting_probs, trash_probs
-
-    def update_details(self,
-                       state_update,
-
-                       halting_update,
-                       halting_res,
-
-                       trash_update,
-                       trash_res,
-
-                       key_probs,
-
-                       output_update,
-                       ):
-        """
-        Updates plan based on the
-        parameters from this round.
-
-        :param state_update:
-        :param halting_update:
-        :param halting_res:
-        :param trash_update:
-        :param trash_res:
-        :param output_update:
-        :return:
-        """
-
-        pass
-
-    def __init__(self,
-
-                 #Environment features
-                 state: torch.Tensor,
-
-                 halting_probs: torch.Tensor,
-                 trash_probs: torch.Tensor,
-                 key_probs: torch.Tensor,
-
-                 halting_residuals: torch.Tensor,
-                 trash_residuals: torch.Tensor,
-
-                 output: torch.Tensor,
-                 trashcan: torch.Tensor,
-
-                 #Constants
-                 trash_epsilon = 0.1
-                 ):
-
-
-        self.state = state
-
-        self.halting_probs = halting_probs
-        self.trash_probs = trash_probs
-        self.key_probs = key_probs
-
-        self.halting_residuals = halting_residuals
-        self.trash_residuals = trash_residuals
-        self.output = output
-        self.trashcan = trashcan
-
-        self.trash_epsilon = trash_epsilon
 
 
