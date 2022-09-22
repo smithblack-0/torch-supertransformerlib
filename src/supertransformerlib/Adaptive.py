@@ -44,7 +44,7 @@ def is_fully_halted(halting_probability: torch.Tensor, halting_epsilon = 0.001)-
 def get_unhalted_batchmesh(halting_probability: torch.Tensor):
 
 
-class Haltable_Attention(Core.KernelSpace):
+class Adaptive_Attention(Core.KernelSpace):
     """
     A very special variety of attention mechanism, this
     works together with halting probabilities to
