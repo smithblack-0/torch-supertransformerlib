@@ -73,7 +73,7 @@ class FeedForward(Core.KernelSpace):
 
     def __init__(self,
                  d_model: int,
-                 d_internal: int = 2048,
+                 d_internal: Optional[int] = None,
                  parallelization: Optional[Union[torch.Tensor, List[int], int]] = None,
                  dynamics: Optional[int] = None,
                  ):
@@ -85,15 +85,17 @@ class FeedForward(Core.KernelSpace):
         """
         if dynamics is None:
             dynamics = 0
+        if d_internal is None:
+            d_internal = 2048
 
         super().__init__()
 
         #Setup a few flags
 
         if parallelization is None:
-            self.ff1 = Core.Linear(d_model, d_internal, dynamics=dynamics)
+            self.ff1 = Core.Linear(d_model, d_internal, parallel=parallelization, dynamics=dynamics)
             self.activation = nn.ReLU()
-            self.ff2 = Core.Linear(d_internal, d_model, dynamics=dynamics)
+            self.ff2 = Core.Linear(d_internal, d_model, parallel=parallelization, dynamics=dynamics)
         else:
             self.ff1 = Core.Linear(d_model, d_internal,
                                     parallel=parallelization,
@@ -221,6 +223,8 @@ class MultiHeadedAttention(Core.KernelSpace, Core.Utility):
         output = output.unsqueeze(-2).transpose(-2, 0).squeeze(0)#(...,(dynamics),(..parallel), item, embedding)
 
         return output
+
+
 
 
 class PIMU(Core.KernelSpace, Core.Utility):
