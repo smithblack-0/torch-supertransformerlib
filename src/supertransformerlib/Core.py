@@ -553,7 +553,6 @@ class Linear(Utility, KernelSpace):
                 bias_shape = torch.concat([torch.tensor([ensemble_width]), bias_shape])
             is_ensembled = True
         else:
-            ensemble_width = 1
             is_ensembled = False
 
 
@@ -587,13 +586,10 @@ class Linear(Utility, KernelSpace):
 
         input_shape, row_length = self.input_map_reference
         column_length, output_shape = self.output_map_reference
-        input_shape_as_list: List[int] = input_shape.tolist() #Required for torchscript assert
-        test_assertion = torch.Size(input_shape_as_list) == tensor.shape[-len(input_shape):]
-
-        assert test_assertion, "Tensor and kernel shapes not compatible"
 
         flattened_input = Glimpses.reshape(tensor,input_shape, row_length)
         flattened_input = flattened_input.unsqueeze(-1)
+
         if self.use_bias:
             flattened_output = torch.matmul(self.matrix_kernel(), flattened_input).squeeze(-1)
             flattened_output = flattened_output + self.bias_kernel()

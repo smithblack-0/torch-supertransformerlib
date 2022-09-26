@@ -2,33 +2,66 @@ import torch
 import unittest
 from src.supertransformerlib import Adaptive
 
+class test_AdaptiveMap(unittest.TestCase):
+    """
+    Test the ability to remap tensors using
+    meshes.
+    """
+    def test_constructor(self):
+        """Test the constructor makes the mesh and mapping correctly."""
+        halted_probabilities = torch.tensor([[0.0, 0.0],[0.1, 1.0], [1.0, 1.0]])
+        map = Adaptive.Adaptive_Map(halted_probabilities)
 
-class test_Adaptive_Attention_Basics(unittest.TestCase):
+        expected_mapping = torch.tensor([[[0, 0], [0, 1]],[[1,0],[1,1]]])
+        self.assertTrue(torch.all(map.mesh == expected_mapping))
+
+        expected_mask = torch.tensor([[True, True], [True, False]])
+        self.assertTrue(torch.all(map.mask == expected_mask))
+    def test_tensor_map_simple(self):
+        """Test the map can restrict and update some simple tensor"""
+        halted_probabilities = torch.tensor([[0.0, 0.0],[0.1, 1.0], [1.0, 1.0]])
+        expected_restricted = torch.tensor([[0.0, 0.0],[0.1, 1.0]])
+        expected_updated = torch.tensor([[0.0, 0.0], [0.0, 1.0], [1.0, 1.0]])
+        map = Adaptive.Adaptive_Map(halted_probabilities)
+
+        restricted = map.restrict(halted_probabilities)
+        self.assertTrue(torch.all(expected_restricted == restricted))
+
+        update = torch.zeros_like(restricted)
+        updated = map.inverse(halted_probabilities, update)
+        self.assertTrue(torch.all(expected_updated == updated))
+    def test_tensor_map_complex(self):
+        """Test that tensor map still performs when extra dimensions are involved beyond the query dim"""
+        halting_probabilities = torch.clamp(2*torch.rand([10, 20, 30]), 0, 1)
+        tensor = torch.randn([10, 20, 30, 5, 6])
+        map = Adaptive.Adaptive_Map(halting_probabilities)
+
+        restricted = map.restrict(tensor)
+        update = map.inverse(tensor, restricted)
+    def test_torchscript_compiles(self):
+        halting_probabilities = torch.clamp(2*torch.rand([10, 20, 30]), 0, 1)
+        map_func = torch.jit.script(Adaptive.Adaptive_Map)
+        map = map_func(halting_probabilities)
+        restricted = map.restrict(halting_probabilities)
+        updated = map.inverse(halting_probabilities, restricted)
+
+
+
+class test_Adaptive_Attention(unittest.TestCase):
     def test_constructor(self):
         """Test the constructor functions reasonably well"""
         Adaptive.Adaptive_Attention(10, 20, 30, 5, 5, 5)
-    def test_startup(self):
-        """Test that the startup feature of the layer is able to make correct accumulators"""
-
-        query = torch.zeros([10, 3, 5, 32])
-        key = torch.zeros([10, 3, 5, 64])
-        value = torch.zeros([10, 3, 5, 48])
-        layer = Adaptive.Adaptive_Attention(32, 64, 48, 5, 5, 5)
-
-        accumulator = layer.start_accumulator(query, key, value)
-        self.assertTrue(accumulator.Halting_Probabilities.shape == query.shape[:-1])
-        self.assertTrue(accumulator.Residuals.shape == query.shape[:-1])
-        self.assertTrue(accumulator.Output.shape == torch.Size([*query.shape[:-1], value.shape[-1]]))
-
     def test_call_simple(self):
         """Test if call works in the simplest of cases"""
         #Setup
 
-        query = torch.randn([5, 32])
-        key = torch.randn([5, 32])
-        value = torch.randn([5, 32])
+        query = torch.randn([1, 5, 32])
+        key = torch.randn([1, 5, 32])
+        value = torch.randn([1, 5, 32])
         layer = Adaptive.Adaptive_Attention(32, 32, 32, 5, 6, 7)
-        accumulator = layer.start_accumulator(query, key, value)
+
+        buffer = Adaptive.Batch_Buffer.start_buffer(query)
+        accumulator = buffer.get_subaccumulator()
 
         #Call
         new_accumulator = layer(accumulator, query, key, value)
@@ -39,27 +72,28 @@ class test_Adaptive_Attention_Basics(unittest.TestCase):
         key = torch.randn([10, 5, 48])
         value = torch.randn([10, 5, 64])
         layer = Adaptive.Adaptive_Attention(32, 48, 64, 5, 6, 7)
-        accumulator = layer.start_accumulator(query, key, value)
+
+        buffer = Adaptive.Batch_Buffer.start_buffer(query, 64)
+        accumulator = buffer.get_subaccumulator()
 
         new_accumulator = layer(accumulator, query, key, value)
         self.assertTrue(torch.any(new_accumulator.Output != accumulator.Output))
 
     def test_halted(self):
         """Test that when the probability gets full, we capture residuals and halt"""
-        query = torch.randn([5, 32])
-        key = torch.randn([5, 48])
-        value = torch.randn([5, 64])
+        query = torch.randn([1, 5, 32])
+        key = torch.randn([1, 5, 48])
+        value = torch.randn([1, 5, 64])
         layer = Adaptive.Adaptive_Attention(32, 48, 64, 5, 6, 7)
 
-        accumulator = layer.start_accumulator(query, key, value)
-        accumulator = Adaptive.Adaptive_Accumulator(torch.ones_like(accumulator.Halting_Probabilities),
-                                                    accumulator.Residuals,
-                                                    accumulator.Output,
-                                                    accumulator.Mask,
-                                                    )
+        buffer = Adaptive.Batch_Buffer.start_buffer(query, 64)
+        buffer = buffer.update(torch.ones([1, 5]))
+        accumulator = buffer.get_subaccumulator()
+
         new_accumulator = layer(accumulator, query, key, value)
         self.assertTrue(torch.all(new_accumulator.Output == accumulator.Output))
         self.assertTrue(torch.all(new_accumulator.Residuals == accumulator.Residuals))
+
     def test_collects_residuals(self):
         """Test that when the probabity is fully exhausted residuals are collected"""
         query = torch.randn([10, 5, 32])
@@ -67,12 +101,10 @@ class test_Adaptive_Attention_Basics(unittest.TestCase):
         value = torch.randn([10, 5, 64])
         layer = Adaptive.Adaptive_Attention(32, 48, 64, 5, 6, 7)
 
-        accumulator = layer.start_accumulator(query, key, value)
-        accumulator = Adaptive.Adaptive_Accumulator(0.9*torch.ones_like(accumulator.Halting_Probabilities),
-                                                    accumulator.Residuals,
-                                                    accumulator.Output,
-                                                    accumulator.Mask
-                                                    )
+        buffer = Adaptive.Batch_Buffer.start_buffer(query, 64)
+        buffer = buffer.update(0.9*torch.ones([10, 5]))
+        accumulator = buffer.get_subaccumulator()
+
         new_accumulator = layer(accumulator, query, key, value)
 
 
@@ -84,53 +116,65 @@ class test_Adaptive_Attention_Basics(unittest.TestCase):
         self.assertTrue(torch.all((expected_residuals-halted_residuals).abs() < 0.001))
 
 
-class test_meshmap_focus(unittest.TestCase):
-    """
-    Test the ability to remap tensors using
-    meshes.
-    """
-    def test_makemesh(self):
-        """Test the meshmap is creating itself properly"""
-        halting_probabilities = torch.randn([3, 2, 4,5])
-        mesh = Adaptive.make_meshmap(halting_probabilities)
-        mesh = torch.stack(mesh, dim=-1)
-        self.assertTrue(mesh.shape == torch.Size([3, 2, 4, 5, 4]))
-    def test_batchmeshprune(self):
-        """Test the ability to prune off dead/halted batches from the construction mesh"""
-        """Test that the finished batch is excluded."""
-        halted_probabilities = torch.tensor([[0.0, 0.0],[0.1, 1.0], [1.0, 1.0]])
-        mesh = Adaptive.make_meshmap(halted_probabilities)
-        mapping = Adaptive.mesh_batchprune(halted_probabilities, mesh)
-        expected_mapping = torch.tensor([[[0, 0], [0, 1]],[[1,0],[1,1]]])
-    def test_batchmeshprune_2(self):
-        halted_probabilities = torch.randn([20,5,3,6,7])
-        mesh = Adaptive.make_meshmap(halted_probabilities)
-        mapping = Adaptive.mesh_batchprune(halted_probabilities)
-class test_focus_get_batch_mesh(unittest.TestCase):
-    """
-    Test case for using the get batch mesh
-    function of focus.
-    """
-    def test_manually(self):
-        """Test that the finished batch is excluded."""
-        halted_probabilities = torch.tensor([[0.0, 0.0],[0.1, 1.0], [1.0, 1.0]])
-        mapping = Adaptive.get_batch_mesh(halted_probabilities)
-        expected_mapping = torch.tensor([[[0, 0], [0, 1]],[[1,0],[1,1]]])
-        self.assertTrue(torch.all(mapping == expected_mapping))
-    def test_complex_shape(self):
-        """Test that mapping works with a complex batch."""
-        halted_probabilities = torch.randn([10, 20, 4, 2, 6])
-        mapping = Adaptive.get_batch_mesh(halted_probabilities)
-        halted_probabilities[mapping.unbind(-1)]
 
-class test_focus_get_querymesh(unittest.TestCase):
-    def test_manually(self):
-        halted_probabilities = torch.tensor([[0.0, 0.0, 1.0],[0.1, 1.0, 1.0], [1.0, 0.2, 1.0]])
-        print(halted_probabilities.data_ptr())
-        mapping, mask = Adaptive.get_query_meshmask(halted_probabilities)
-        outcome = halted_probabilities[mapping.unbind(-1)]
-        print(outcome.data_ptr())
 
-        outcome = outcome*mask
-        expected_outcome = torch.tensor([[0.0, 0.0], [0.1, 0.0], [0.2, 0.0]])
-        self.assertTrue(torch.all(outcome == expected_outcome))
+class test_Adaptive_Attention_Integration(unittest.TestCase):
+    """
+    Tests that when put together, the mapping features and layers
+    can perform adaptive attention over something like a batch
+    """
+    def test_mechanism_basic(self):
+        """
+        Test that mapping and halting may be elegantly performed.
+
+        The logic here test ability to elegantly remap keys and
+        perform attention until halted.
+        """
+        batch_mockup = torch.randn([20, 20, 10, 32])
+        key_mockup = torch.randn([20, 20, 10, 64])
+        layer_mockup = Adaptive.Adaptive_Attention(32, 64, 64, 4, 4, 4)
+
+        buffer = Adaptive.Batch_Buffer.start_buffer(batch_mockup, 64)
+        while not buffer.is_halted():
+            subbatch = buffer.get_subaccumulator()
+            subquery = buffer.Map.restrict(batch_mockup)
+            subkey = buffer.Map.restrict(key_mockup)
+
+            update = layer_mockup(subbatch, subquery, subkey, subkey)
+            buffer.set_from_subaccumulator(update)
+    @unittest.skipUnless(torch.cuda.is_available(), "gpu test requires valid gpu install")
+    def test_mechanism_cuda(self):
+
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+
+        batch_mockup = torch.randn([20, 20, 10, 32]).to(device)
+        key_mockup = torch.randn([20, 20, 10, 64]).to(device)
+        layer_mockup = Adaptive.Adaptive_Attention(32, 64, 64, 4, 4, 4).to(device)
+
+        buffer = Adaptive.Batch_Buffer.start_buffer(batch_mockup, 64)
+        count = 0
+        while not buffer.is_halted():
+            print(count)
+            count += 1
+            subbatch = buffer.get_subaccumulator()
+            subquery = buffer.Map.restrict(batch_mockup)
+            subkey = buffer.Map.restrict(key_mockup)
+
+            update = layer_mockup(subbatch, subquery, subkey, subkey)
+            buffer.set_from_subaccumulator(update)
+    def test_profile_cpu(self):
+
+        from torch.profiler import profile, record_function,ProfilerActivity
+        with profile(activities=[ProfilerActivity.CPU], record_shapes=True) as prof:
+            with record_function("model_inference"):
+                self.test_mechanism_basic()
+
+        print(prof.key_averages().table())
+    def test_profile_gpu(self):
+        from torch.profiler import profile, record_function, ProfilerActivity
+        with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA], record_shapes=True) as prof:
+            with record_function("model_inference"):
+                self.test_mechanism_cuda()
+
+        print(prof.key_averages().table())

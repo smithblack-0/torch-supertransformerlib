@@ -38,17 +38,187 @@ from dataclasses import dataclass
 from . import Core
 from . import Attention
 
-Adaptive_Accumulator = namedtuple(
-    "Adaptive_Accumulator",
-    [
-        "Halting_Probabilities",
-        "Residuals",
-        "Output",
-    ]
-
-)
 
 
+
+
+
+
+class Adaptive_Map():
+    """
+    A small class capable of mapping from and to unhalted space.
+    It flattens all dimensions along the batch dims and only
+    spits out unhalted batches. It also masks out unhalted
+    queries.
+    """
+    def restrict(self, tensor: torch.Tensor) -> torch.Tensor:
+        """
+        Applies the map to bring the tensor into the restricted
+        space.
+        :param tensor: Tensor to map into restricted space
+        :return: The tensor, mapped into restricted space.
+        """
+        return tensor[self.mesh.unbind(-1)]
+
+    def inverse(self, tensor: torch.Tensor, update: torch.Tensor) -> torch.Tensor:
+        """
+
+        :param tensor: The original tensor
+        :param update: The updated tensor
+        :return: The updated tensor.
+        """
+
+        #Expand mask to match shape
+        mask = self.mask
+        if mask.dim() < len(self.shape):
+            #Figure out what the expansion shape is,
+            #make extra dimensions, then expand mask
+            #using views.
+            shape = [-1]*mask.dim()
+            shape += list(tensor.shape[len(self.shape):])
+            while mask.dim() < len(shape):
+                mask = mask.unsqueeze(-1)
+            mask = mask.expand(shape)
+
+        masked_update = torch.where(mask, update, tensor[self.mesh.unbind(-1)])
+        output = tensor.clone()
+        output[self.mesh.unbind(-1)] = masked_update
+        return output
+
+    def __init__(self,
+                 halting_probabilities: torch.Tensor,
+                 ):
+
+        #Make map
+
+        mesh = torch.meshgrid([torch.arange(elem) for elem in halting_probabilities.shape], indexing="ij")
+        mesh = torch.stack(mesh, dim=-1)
+        mesh = mesh.to(halting_probabilities.device)
+
+
+        # Figure out which batches are unhalted. Do this by
+        # collecting all the data dimensions together into one row,
+        # then asking if they have all halted.
+
+        unhalted_batches = halting_probabilities < 1 - 0.001  # (... [data...])
+        unhalted_batches = unhalted_batches.flatten(-1, -1)
+        unhalted_batches = torch.any(unhalted_batches, dim=-1)  # ([batch...])
+
+        # Flatten the mesh and the batch dimensions, then select from the
+        # mesh only the unhalted batches.
+
+        unhalted_batches = unhalted_batches.flatten()
+        flatmesh = mesh.flatten(0, -2 - 1)
+        index = torch.arange(unhalted_batches.shape[0], device=unhalted_batches.device).masked_select(unhalted_batches)
+        mesh = flatmesh.index_select(dim=0, index=index)
+
+        #Generate the activity mask.
+        mask = halting_probabilities[mesh.unbind(-1)] < 1 - 0.001
+
+        #Store
+        self.shape = halting_probabilities.shape
+        self.mesh = mesh
+        self.mask = mask
+
+
+class Subaccumulator:
+    """
+    A subset of the entire batch, containing
+    elements which are not yet halted.
+    """
+    def update(self,
+               Halting_Probabilities: Optional[torch.Tensor] = None,
+               Residuals: Optional[torch.Tensor] = None,
+               Output: Optional[torch.Tensor] = None,
+               ):
+        """
+        Updates the given entries with the new values. Anything not given stays the same.
+        """
+        if Halting_Probabilities is None:
+            Halting_Probabilities = self.Halting_Probabilities
+        if Residuals is None:
+            Residuals = self.Residuals
+        if Output is None:
+            Output = self.Output
+        return Subaccumulator(Halting_Probabilities, Residuals, Output)
+
+    def __init__(self,
+                 Halting_Probabilities: torch.Tensor,
+                 Residuals: torch.Tensor,
+                 Output: torch.Tensor,
+                 ):
+        self.Halting_Probabilities = Halting_Probabilities
+        self.Residuals = Residuals
+        self.Output = Output
+
+class Batch_Buffer():
+    """
+    A small accumulator in which information important
+    to the adaptive halting process may be stored away.
+
+    This class is capable of restricting itself down
+    to unhalted batches and restoring itself as well.
+    """
+    def is_halted(self):
+        return torch.all(self.Halting_Probabilities >= 1 - 0.001)
+    @staticmethod
+    def start_buffer(word_embeddings: torch.Tensor, embedding_length: Optional[int] = None):
+        """Starts a buffer. If the output dim is none, it is expected the
+        embed dim and output dim are the same
+        :param word_embeddings: A word embedding tensor. Used to find out shapes
+        :param embedding_length: Optional. An embedding length. If the output embedding is different
+        than the input embedding this may be set. Else, leave alone.
+        """
+
+
+        halting_probabilities = torch.zeros(word_embeddings.shape[:-1], device=word_embeddings.device)
+        residuals = torch.zeros(word_embeddings.shape[:-1], device=word_embeddings.device)
+        if embedding_length:
+            shape = list(word_embeddings.shape[:-1]) + [embedding_length]
+        else:
+            shape = list(word_embeddings.shape)
+        output = torch.zeros(shape, device=word_embeddings.device)
+        return Batch_Buffer(halting_probabilities, residuals, output)
+
+    def get_subaccumulator(self)->Subaccumulator:
+        """Gets a subaccumulator which contains the unhalted entries."""
+        halting_probs = self.Map.restrict(self.Halting_Probabilities)
+        residuals = self.Map.restrict(self.Residuals)
+        output = self.Map.restrict(self.Output)
+        return Subaccumulator(halting_probs, residuals, output)
+
+    def set_from_subaccumulator(self, update: Subaccumulator):
+        """Updates the accumulator with the results from a particular subbatch"""
+        self.Halting_Probabilities = self.Map.inverse(self.Halting_Probabilities, update.Halting_Probabilities)
+        self.Residuals = self.Map.inverse(self.Residuals, update.Residuals)
+        self.Output = self.Map.inverse(self.Output, update.Output)
+        self.Map = Adaptive_Map(self.Halting_Probabilities)
+
+    def update(self,
+               Halting_Probabilities: Optional[torch.Tensor] = None,
+               Residuals: Optional[torch.Tensor] = None,
+               Output: Optional[torch.Tensor] = None,
+               ):
+        """
+        Updates the given entries with the new values. Anything not given stays the same.
+        """
+        if Halting_Probabilities is None:
+            Halting_Probabilities = self.Halting_Probabilities
+        if Residuals is None:
+            Residuals = self.Residuals
+        if Output is None:
+            Output = self.Output
+        return Batch_Buffer(Halting_Probabilities, Residuals, Output)
+    def __init__(self,
+                Halting_Probabilities: torch.Tensor,
+                Residuals: torch.Tensor,
+                Output: torch.Tensor,
+                 ):
+
+        self.Map = Adaptive_Map(Halting_Probabilities)
+        self.Halting_Probabilities = Halting_Probabilities
+        self.Residuals = Residuals
+        self.Output = Output
 
 
 
@@ -73,17 +243,6 @@ class Adaptive_Attention(Core.KernelSpace):
     provided next round.
     """
 
-    @torch.jit.export
-    def start_accumulator(self, query, key, value)->Adaptive_Accumulator:
-        """
-        Given a query, key, and value starts a compatible accumulator for catching
-        outputs and residuals.
-        """
-
-        halting_probabilities = torch.zeros(query.shape[:-1])
-        residuals = torch.zeros(query.shape[:-1])
-        output = torch.zeros(list(query.shape[:-1]) + [value.shape[-1]])
-        return Adaptive_Accumulator(halting_probabilities, residuals, output)
 
     def __init__(self,
                  d_query: int,
@@ -95,13 +254,13 @@ class Adaptive_Attention(Core.KernelSpace):
                  parallelization: Optional[Union[torch.Tensor, List[int], int]] = None,
                  dynamics: Optional[int] = None):
         """
-
         :param d_query: The query embedding width
         :param d_key: The key embedding width
         :param d_value: The value embedding width
         :param d_confidence: Internal. How much embedding to dedicate to confidence
         :param d_assembly: Internal. How much embedding to dedicate to assembly
         :param heads: The number of heads.
+        :param subheads: The number of subheads.
         :param parallelization:
         :param dynamics:
         """
@@ -169,12 +328,12 @@ class Adaptive_Attention(Core.KernelSpace):
         return query, key
 
     def forward(self,
-                accumulator: Adaptive_Accumulator,
+                accumulator: Subaccumulator,
                 query: torch.Tensor,
                 key: torch.Tensor,
                 value: torch.Tensor,
                 mask: Optional[torch.Tensor] = None,
-                )->Adaptive_Accumulator:
+                )->Subaccumulator:
 
         #Generate the heads
 
@@ -242,7 +401,7 @@ class Adaptive_Attention(Core.KernelSpace):
         residuals_update = torch.where(
             requires_adjustment,
             clamp_adjustment*raw_halting_probability_update,
-            torch.tensor(0.0)) #(..., query)
+            torch.tensor(0.0, device=raw_halting_probability_update.device)) #(..., query)
         halting_probability_update = torch.where(
             requires_adjustment,
             clamp_adjustment * raw_halting_probability_update,
@@ -269,276 +428,11 @@ class Adaptive_Attention(Core.KernelSpace):
         halting_probabilities = accumulator.Halting_Probabilities + halting_probability_update
         residuals = accumulator.Residuals + residuals_update
         output = accumulator.Output + output_update
-        return Adaptive_Accumulator(halting_probabilities, residuals, output)
+        return accumulator.update(halting_probabilities, residuals, output)
 
 # Focus utilities. These generally help minimize computational overhead
 # by avoiding performing calculations where they are unneeded.
 
-MeshMap = namedtuple(
-    "Meshmap",
-    ("Mesh",
-     "Mask")
-)
-
-def make_meshmap(halting_probabilities, data_width: int = 1)->MeshMap:
-    """
-    Makes a mapping mesh capable of selecting
-    the entire halting probability tensor.
-
-    This will be restricted downstream.
-
-
-
-    :param halting_probabilities: The halting probabilities
-    :param data_width: How wide the data dimension needs to be.
-    :return: A meshmap. Indexed on last dim
-    """
-    mesh = torch.meshgrid(*[torch.arange(elem) for elem in halting_probabilities.shape])
-    mask = torch.full_like(halting_probabilities, True, dtype=torch.bool)
-    return MeshMap(mesh, mask)
-
-def mesh_batchprune(halting_probabilities: torch.Tensor,
-                    meshmap: MeshMap)->MeshMap:
-    """
-    A meshmap focus function. Performs the function of
-    discarding any text embeddings from the map for
-    which it is found the batch is fully done. Flattens
-    the batch space as well.
-
-    :param halting_probabilities: The current halting probabilities for each mesh item
-    :param mesh: The current mesh.
-    :return: A new mesh.
-    """
-
-    #Turn the mesh back into a tensor
-    mesh = torch.stack(meshmap.Mesh, dim=-1) #(..., [data...], index)
-
-    #Figure out which batches are unhalted. Do this by
-    #collecting all the data dimensions together into one row,
-    #then asking if they have all halted.
-
-    unhalted_batches = halting_probabilities > 1 - 0.001 #(... [data...])
-    unhalted_batches = unhalted_batches.flatten(-1-data_width, -1) #(..., flatdata)
-    unhalted_batches = torch.any(unhalted_batches, dim=-1) #([batch...])
-
-    #Flatten the mesh and the batch dimensions, then select from the
-    #mesh only the unhalted batches.
-
-    unhalted_batches = unhalted_batches.flatten()
-    flatmesh = mesh.flatten(0,-2-data_width)
-    index = torch.arange(unhalted_batches.shape[0]).masked_select(unhalted_batches)
-    mesh = flatmesh.index_select(dim=0, index=index)
-    mesh = mesh.unbind(-1)
-
-    return MeshMap(mesh, meshmap.Mask[mesh], meshmap.d_dims)
-
-def mesh_dataprune(halting_probabilities: torch.Tensor,
-                    meshmap: MeshMap,
-                    )->MeshMap:
-    """
-    Uses the halting probabilities which are known to compact
-    the data dimensions as much as possible, ignoring the
-    unutilized features.
-
-    :param halting_probabilities: The current halting probabilities, as far as known
-    :param meshmap: The current meshmap
-    :return: A new meshmap. This one will have an active mask.
-    """
-
-    data_dimensions = meshmap.d_dims
-    mesh = meshmap.Mesh
-    unhalted_data = halting_probabilities < 1.0 - 0.001
-
-    for i in range(data_dimensions):
-        i=i+1
-
-        # Figure out what the current mesh mapping should be
-        max_unhalted_queries = torch.max(unhalted_data.sum(dim=-i))
-        sort_order = torch.argsort(unhalted_data, dim=-i, descending=True)
-        sort_order = sort_order[:, :max_unhalted_queries]
-
-        dim_mesh = torch.meshgrid(*[torch.arange(elem) for elem in sort_order.shape])
-        dim_mesh = mesh[..., -i] = sort_order
-
-        #Update the outputs
-
-
-
-
-    # Create the rest of the mesh. Reassign the mesh based on the sort order.
-    # Permute the mask.
-
-    mesh = torch.stack(mesh, dim=-1)
-    mesh[..., -1] = sort_order
-    mask = unhalted_mask[mesh.unbind(-1)]
-
-
-def get_batch_mesh(
-        halting_probabilities: torch.Tensor
-        )->torch.Tensor:
-        """
-        Gets a mesh which can be used to
-        sample a currently existing tensor of
-        initial shape halting probability, and which will
-        draw from it only the nonhalted batch.
-
-        :param halting_probabilities:
-        :return:
-        """
-        #Go create the
-
-        #Create a mesh which matches the current situation
-
-
-
-        #Look at the halting probabilities, and keep anything with an active query
-        #in it. Once this is done, go ahead and flatten the probabilities, and
-        #find indexes we can associated with each unhalted segment.
-
-        unhalted = halting_probabilities < 1.0 -0.000001
-        unhalted = torch.any(unhalted, dim = - 1)
-        unhalted = unhalted.flatten()
-        index = torch.arange(unhalted.shape[-1]).masked_select(unhalted)
-
-        #Flatten the mesh down to only batch, and query. Select
-        #the unhalted entries.
-
-        mesh = mesh.flatten(0, -3)
-        output = mesh[index, :, :]
-
-        #Return the output
-        return output
-
-def get_query_meshmask(
-        halting_probabilities
-    )->Tuple[torch.Tensor, torch.Tensor]:
-
-    """
-
-    Gets using the halting probabilities in as
-    compact a representation as possible the unhalted
-    queries.
-
-    This consists of identifying what is unhalted, promoting it
-
-    :param halting_probabilities:
-    :return:
-        index_mesh: A mesh which will map the problem such that unhalted queries
-        come first.
-        mask: A mask which can multiply the mapped tensor to mask out whatever remains
-        unmasked.
-    """
-
-    # Create a mask indicating what queries have already halted. Sort the mask in
-    # descending order. Clip off unneeded portions.
-
-    unhalted_mask = halting_probabilities < 1.0 - 0.001
-    max_unhalted_queries = torch.max(unhalted_mask.sum(dim=-1))
-    sort_order = torch.argsort(unhalted_mask, dim=-1, descending=True)
-    sort_order = sort_order[:, :max_unhalted_queries]
-
-    #Create the rest of the mesh. Reassign the mesh based on the sort order.
-    #Permute the mask.
-
-    mesh = torch.meshgrid(*[torch.arange(elem) for elem in sort_order.shape])
-    mesh = torch.stack(mesh, dim=-1)
-    mesh[...,-1] = sort_order
-    mask = unhalted_mask[mesh.unbind(-1)]
-
-    return mesh, mask
-
-
-
-class Accumulator_Focus():
-    """
-    A small transformation class which is capable
-    of transforming an accumulator to focus only on
-    the unhalted batches and queries.
-    """
-    def restrict(self, accumulator: Adaptive_Accumulator)->Adaptive_Accumulator:
-        """
-        Generates a new adapative accumulator with halted batches and queries trimmed out,
-        dependent on configuration
-
-        :param accumulator: The base accumulator to work with
-        :return: A revised accumulator, with as high a calculation efficiency as possible
-        """
-        halting_probabilities = accumulator.Halting_Probabilities
-        residuals = accumulator.Residuals
-        output = accumulator.Output
-
-        #Handle batch level refinement.
-        if self.restrict_batch:
-            mesh = get_batch_mesh(halting_probabilities)
-            halting_probabilities = halting_probabilities[mesh.unbind(-1)]
-            residuals = residuals[mesh.unbind(-1)]
-            output = output[mesh.unbind(-1)]
-        if self.restrict_query:
-            mesh, mask = get_query_meshmask(halting_probabilities)
-            halting_probabilities = halting_probabilities[mesh.unbind(-1)]*mask
-            residuals = residuals[mask.unbind(-1)]*mask
-            output = output[mask.unbind(-1)]*mask
-
-        return Adaptive_Accumulator(halting_probabilities, residuals, output)
-
-
-    def update(self,
-               accumulator: Adaptive_Accumulator,
-               new_accumulator: Adaptive_Accumulator)->Adaptive_Accumulator:
-        """
-
-        Updates the original accumulator with the results of
-        adaptive attention
-
-        :param accumulator: The entire accumulator
-        :param new_accumulator: The results of attention.
-        :return: The entire accumulator, with updates applied.
-        """
-        halting_probabilities = accumulator.Halting_Probabilities.clone()
-        residuals = accumulator.Residuals.clone()
-        output = accumulator.Output.clone()
-
-        mesh = torch.meshgrid(*[torch.arange(elem) for elem in halting_probabilities.shape])
-        mesh = torch.stack(mesh, dim=-1)
-        if self.restrict_batch:
-            meshmap = get_batch_mesh(halting_probabilities)
-            halting_probabilities = halting_probabilities[meshmap.unbind(-1)]
-            mesh = mesh[meshmap.unbind(-1)]
-        if self.restrict_query:
-            meshmap, mask = get_batch_mesh(halting_probabilities)
-            mesh = mesh[meshmap.unbind(-1)]
-        else:
-            mask = None
-
-        if mask is not None:
-            halting_update = new_accumulator.Halting_Probabilities*mask
-            residual_update = new_accumulator.Residuals*mask
-            output_update = new_accumulator.Output*mask
-        else:
-            halting_update = new_accumulator.Halting_Probabilities
-            residual_update = new_accumulator.Residuals
-            output_update = new_accumulator.Output
-
-        halting_probabilities[mesh.unbind(-1)] = halting_update
-        residuals[mesh.unbind(-1)] = residual_update
-        output[mesh.unbind(-1)] = output_update
-
-        return Adaptive_Accumulator(halting_probabilities, residuals, output)
-
-
-    def __init__(self,
-                 restrict_halted_batches: bool = True,
-                 restrict_halted_queries: bool = True,
-                 ):
-        self.restrict_batch = restrict_halted_batches
-        self.restrict_query = restrict_halted_queries
-
-class Query_Focus():
-    """
-    A small transformation package which will focus
-    a given query tensor backed by an accumulator
-    onto as small a batch as I can.
-   """
 
 class Calculate_Trash_Update(Core.KernelSpace):
     """

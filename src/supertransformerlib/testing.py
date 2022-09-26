@@ -4,23 +4,12 @@ from torch import nn
 from torch.nn import Module
 import dataclasses
 
-@torch.jit.script
-class test_set:
-
-    def __init__(self,
-                 tensor: torch.Tensor,
-                 integer: int,
-                 ):
-
-        self.tensor = tensor
-        self.integer = integer
 
 @torch.jit.script
-def test_instancing():
-    instance = test_set(torch.randn([3, 4]), 5)
-    instance.integer = 7
-    instance.tensor = torch.randn([6, 7])
-    return instance.tensor, instance.integer
+def selector(tensor, a, b)->torch.Tensor:
+    return tensor[a, b]
 
-
-print(test_instancing())
+tensor = torch.randn([300, 300])
+a = torch.randint(0, 300, [10, 10])
+b = torch.randint(0, 300, [10, 10])
+print(selector(tensor, a, b))

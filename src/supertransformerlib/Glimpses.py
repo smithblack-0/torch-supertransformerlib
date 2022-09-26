@@ -80,6 +80,30 @@ def view(tensor,
     return output
 
 
+def _strided_reshape(tensor: torch.Tensor, input_shape: torch.Tensor, output_shape: torch.Tensor)->torch.Tensor:
+    """
+    A helper function which performs strided reshape when requested
+    """
+    # Perform view action.
+    slice_length: int = len(input_shape)
+    static_shape: torch.Tensor = torch.tensor(tensor.shape[:-slice_length], dtype=torch.int64)
+
+    final_shape: torch.Tensor = torch.concat([static_shape, output_shape])
+    final_shape: List[int] = final_shape.tolist()
+
+    output: torch.Tensor = tensor.reshape(final_shape)
+    return output
+
+def _sparse_reshape(tensor: torch.Tensor,
+                    input_shape: torch.Tensor,
+                    output_shape: torch.Tensor,
+                    resize_sparse_dims: bool = True)->torch.Tensor:
+    """
+    A small function to perform a sparse reshape. Element number must remain the same.
+    """
+    pass
+
+
 def reshape(tensor,
             input_shape: Union[torch.Tensor, List[int], int],
             output_shape: Union[torch.Tensor, List[int], int]) -> torch.Tensor:
@@ -135,15 +159,10 @@ def reshape(tensor,
     # Basic sanity testing
     assert input_shape.prod() == output_shape.prod(), \
         "Shapes incompatible: Input shape and output shape were not compatible: "
-
-    # Perform view action.
-    slice_length: int = len(input_shape)
-    static_shape: torch.Tensor = torch.tensor(tensor.shape[:-slice_length], dtype=torch.int64)
-
-    final_shape: torch.Tensor = torch.concat([static_shape, output_shape])
-    final_shape: List[int] = final_shape.tolist()
-
-    output: torch.Tensor = tensor.reshape(final_shape)
+    if tensor.is_sparse:
+        raise ValueError("Resizing of sparse tensors is not yet supported")
+    else:
+        output = _strided_reshape(tensor, input_shape, output_shape)
     return output
 
 
