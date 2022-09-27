@@ -16,6 +16,8 @@ class test_AdaptiveMap(unittest.TestCase):
         self.assertTrue(torch.all(map.mesh == expected_mapping))
 
         expected_mask = torch.tensor([[True, True], [True, False]])
+        print(expected_mask.shape)
+        print(map.mask.shape)
         self.assertTrue(torch.all(map.mask == expected_mask))
     def test_tensor_map_simple(self):
         """Test the map can restrict and update some simple tensor"""
@@ -44,6 +46,30 @@ class test_AdaptiveMap(unittest.TestCase):
         map = map_func(halting_probabilities)
         restricted = map.restrict(halting_probabilities)
         updated = map.inverse(halting_probabilities, restricted)
+    def test_torchscript_metacompiles(self):
+
+        @torch.jit.script
+        def makemap(halting_probs):
+            return Adaptive.Adaptive_Map(halting_probs)
+        map = makemap(torch.rand([10, 10, 10]))
+
+
+class test_Buffer(unittest.TestCase):
+    """
+    Test the ability of the buffer to function
+    correctly
+    """
+    def test_torchscript(self):
+        @torch.jit.script
+        def makemap(hprobs):
+            return Adaptive.Adaptive_Map(hprobs)
+
+        cls = torch.jit.script(Adaptive.Batch_Buffer)
+
+        @torch.jit.script
+        def make_buffer(hprobs):
+            return Adaptive.Batch_Buffer.start_buffer(hprobs)
+        make_buffer(torch.rand([10, 10, 10]))
 
 
 
@@ -123,6 +149,7 @@ class test_Adaptive_Attention_Integration(unittest.TestCase):
     Tests that when put together, the mapping features and layers
     can perform adaptive attention over something like a batch
     """
+
     def test_mechanism_basic(self):
         """
         Test that mapping and halting may be elegantly performed.
@@ -155,7 +182,6 @@ class test_Adaptive_Attention_Integration(unittest.TestCase):
         buffer = Adaptive.Batch_Buffer.start_buffer(batch_mockup, 64)
         count = 0
         while not buffer.is_halted():
-            print(count)
             count += 1
             subbatch = buffer.get_subaccumulator()
             subquery = buffer.Map.restrict(batch_mockup)
@@ -163,7 +189,30 @@ class test_Adaptive_Attention_Integration(unittest.TestCase):
 
             update = layer_mockup(subbatch, subquery, subkey, subkey)
             buffer.set_from_subaccumulator(update)
-    def test_profile_cpu(self):
+    def test_mechanism_as_torchscript(self):
+        """Test that torchscript compilation is functional"""
+        class test_torchscript(torch.nn.Module):
+            def __init__(self, q_query, q_key, q_value, q_confidence, q_assembly, heads):
+                super().__init__()
+                self.attn = Adaptive.Adaptive_Attention(32, 64, 64, 4, 4, 4)
+            def forward(self, batch_mockup, key_mockup):
+                buffer = Adaptive.Batch_Buffer.start_buffer(batch_mockup, 64)
+                while not buffer.is_halted():
+                    subbatch = buffer.get_subaccumulator()
+                    subquery = buffer.Map.restrict(batch_mockup)
+                    subkey = buffer.Map.restrict(key_mockup)
+
+                    update = self.attn(subbatch, subquery, subkey, subkey)
+                    buffer.set_from_subaccumulator(update)
+                return buffer
+
+        batch_mockup = torch.randn([20, 20, 10, 32])
+        key_mockup = torch.randn([20, 20, 10, 64])
+        layer_mockup = test_torchscript(32, 64, 64, 4, 4, 4)
+        layer_mockup = torch.jit.script(layer_mockup)
+        layer_mockup(batch_mockup, key_mockup)
+
+    def profile_cpu(self):
 
         from torch.profiler import profile, record_function,ProfilerActivity
         with profile(activities=[ProfilerActivity.CPU], record_shapes=True) as prof:
@@ -171,7 +220,7 @@ class test_Adaptive_Attention_Integration(unittest.TestCase):
                 self.test_mechanism_basic()
 
         print(prof.key_averages().table())
-    def test_profile_gpu(self):
+    def profile_gpu(self):
         from torch.profiler import profile, record_function, ProfilerActivity
         with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA], record_shapes=True) as prof:
             with record_function("model_inference"):

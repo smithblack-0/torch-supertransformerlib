@@ -33,17 +33,12 @@ from typing import Optional, Union, List, Tuple
 import torch
 from torch import nn
 from collections import namedtuple
-from dataclasses import dataclass
 
 from . import Core
 from . import Attention
 
 
-
-
-
-
-
+@torch.jit.script
 class Adaptive_Map():
     """
     A small class capable of mapping from and to unhalted space.
@@ -90,10 +85,9 @@ class Adaptive_Map():
                  ):
 
         #Make map
-
-        mesh = torch.meshgrid([torch.arange(elem) for elem in halting_probabilities.shape], indexing="ij")
+        mesh = torch.meshgrid([torch.arange(elem, device=halting_probabilities.device)
+                               for elem in halting_probabilities.shape], indexing="ij")
         mesh = torch.stack(mesh, dim=-1)
-        mesh = mesh.to(halting_probabilities.device)
 
 
         # Figure out which batches are unhalted. Do this by
@@ -104,21 +98,33 @@ class Adaptive_Map():
         unhalted_batches = unhalted_batches.flatten(-1, -1)
         unhalted_batches = torch.any(unhalted_batches, dim=-1)  # ([batch...])
 
+
         # Flatten the mesh and the batch dimensions, then select from the
         # mesh only the unhalted batches.
 
         unhalted_batches = unhalted_batches.flatten()
         flatmesh = mesh.flatten(0, -2 - 1)
         index = torch.arange(unhalted_batches.shape[0], device=unhalted_batches.device).masked_select(unhalted_batches)
-        mesh = flatmesh.index_select(dim=0, index=index)
+
+
+
+        revised_mesh = flatmesh.index_select(dim=0, index=index)
 
         #Generate the activity mask.
-        mask = halting_probabilities[mesh.unbind(-1)] < 1 - 0.001
+        #
+        # TODO: The following indexing technique is, aparently, not torchscript
+        # compatible and will need to be reworked at some point. torchscript does not like
+        # indexing.
+        #
+        # I suggest ditching the vector indexing and replacing it with
+        # flatten + index_select on the restrict pass, and
+        # scatter on the inverse pass.
 
-        #Store
+        mask = halting_probabilities[revised_mesh.unbind(-1)] < 1 - 0.001
+
         self.shape = halting_probabilities.shape
-        self.mesh = mesh
         self.mask = mask
+        self.mesh = revised_mesh
 
 
 class Subaccumulator:
@@ -151,6 +157,7 @@ class Subaccumulator:
         self.Residuals = Residuals
         self.Output = Output
 
+@torch.jit.script
 class Batch_Buffer():
     """
     A small accumulator in which information important
@@ -173,7 +180,7 @@ class Batch_Buffer():
 
         halting_probabilities = torch.zeros(word_embeddings.shape[:-1], device=word_embeddings.device)
         residuals = torch.zeros(word_embeddings.shape[:-1], device=word_embeddings.device)
-        if embedding_length:
+        if embedding_length is not None:
             shape = list(word_embeddings.shape[:-1]) + [embedding_length]
         else:
             shape = list(word_embeddings.shape)
@@ -209,12 +216,12 @@ class Batch_Buffer():
         if Output is None:
             Output = self.Output
         return Batch_Buffer(Halting_Probabilities, Residuals, Output)
+
     def __init__(self,
                 Halting_Probabilities: torch.Tensor,
                 Residuals: torch.Tensor,
                 Output: torch.Tensor,
                  ):
-
         self.Map = Adaptive_Map(Halting_Probabilities)
         self.Halting_Probabilities = Halting_Probabilities
         self.Residuals = Residuals
