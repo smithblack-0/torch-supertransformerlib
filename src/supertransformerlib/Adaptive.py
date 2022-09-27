@@ -38,25 +38,34 @@ from . import Core
 from . import Attention
 
 
-@torch.jit.script
 class Adaptive_Map():
-    """
-    A small class capable of mapping from and to unhalted space.
-    It flattens all dimensions along the batch dims and only
-    spits out unhalted batches. It also masks out unhalted
-    queries.
-    """
+    """'
+    A small class capable of mapping from and to unhalted
+    space efficiency. This improves calculation efficiency
+
+    It bases all calculations on the halting probabilities
+    tensor it is fed - probability 1.0 means halted.
+
+    Two functions exist. These are restrict, and update.
+    Restrict ensures that as efficient a batch as possible
+    is fed to
+
+    '"""
     def restrict(self, tensor: torch.Tensor) -> torch.Tensor:
         """
-        Applies the map to bring the tensor into the restricted
-        space.
+        When restricting, it restricts the output to
+        a flat batch of only unhalted channels.
+
         :param tensor: Tensor to map into restricted space
         :return: The tensor, mapped into restricted space.
         """
-        return tensor[self.mesh.unbind(-1)]
+        tensor = self._flatten_batch(tensor)
+        return tensor[self.index]
 
-    def inverse(self, tensor: torch.Tensor, update: torch.Tensor) -> torch.Tensor:
+    def update(self, tensor: torch.Tensor, update: torch.Tensor) -> torch.Tensor:
         """
+        The update map. Takes a result from performing an
+        update and merges it into the accumulator.
 
         :param tensor: The original tensor
         :param update: The updated tensor
@@ -65,30 +74,44 @@ class Adaptive_Map():
 
         #Expand mask to match shape
         mask = self.mask
+        tensor = self._flatten_batch(tensor)
         if mask.dim() < len(self.shape):
             #Figure out what the expansion shape is,
             #make extra dimensions, then expand mask
             #using views.
             shape = [-1]*mask.dim()
-            shape += list(tensor.shape[len(self.shape):])
+            shape += list(tensor.shape[mask.dim():])
             while mask.dim() < len(shape):
                 mask = mask.unsqueeze(-1)
             mask = mask.expand(shape)
 
-        masked_update = torch.where(mask, update, tensor[self.mesh.unbind(-1)])
-        output = tensor.clone()
-        output[self.mesh.unbind(-1)] = masked_update
-        return output
+        masked_update = torch.where(mask, update, tensor[self.index])
+        tensor[self.index] = masked_update
+        tensor = self._unflatten_batch(tensor)
+        return tensor
+
+    def _flatten_batch(self, tensor: torch.Tensor)->torch.Tensor:
+        """Flattens all batch dimensions"""
+        return tensor.flatten(0, self.batch_dim)
+
+    def _unflatten_batch(self, tensor: torch.Tensor)-> torch.Tensor:
+        """Unflatten all batch dimensions. """
+        shape = list(self.shape) + list(tensor.shape[2:])
+        shape = torch.Size(shape)
+        return tensor.view(shape)
 
     def __init__(self,
                  halting_probabilities: torch.Tensor,
+                 parallization: int = 0,
                  ):
+        """
 
-        #Make map
-        mesh = torch.meshgrid([torch.arange(elem, device=halting_probabilities.device)
-                               for elem in halting_probabilities.shape], indexing="ij")
-        mesh = torch.stack(mesh, dim=-1)
+        :param halting_probabilities: A tensor
+        :param parallization:
+        """
 
+        #Figure out the number of batch dimensions.
+        batch_dims = halting_probabilities.dim() - 2
 
         # Figure out which batches are unhalted. Do this by
         # collecting all the data dimensions together into one row,
@@ -97,34 +120,21 @@ class Adaptive_Map():
         unhalted_batches = halting_probabilities < 1 - 0.001  # (... [data...])
         unhalted_batches = unhalted_batches.flatten(-1, -1)
         unhalted_batches = torch.any(unhalted_batches, dim=-1)  # ([batch...])
-
-
-        # Flatten the mesh and the batch dimensions, then select from the
-        # mesh only the unhalted batches.
-
         unhalted_batches = unhalted_batches.flatten()
-        flatmesh = mesh.flatten(0, -2 - 1)
         index = torch.arange(unhalted_batches.shape[0], device=unhalted_batches.device).masked_select(unhalted_batches)
 
+        #Generate the remaining mask.
 
+        mask = halting_probabilities.flatten(0, batch_dims)
+        mask = mask[index]
+        mask = mask < 1 - 0.001
 
-        revised_mesh = flatmesh.index_select(dim=0, index=index)
+        #Store away
 
-        #Generate the activity mask.
-        #
-        # TODO: The following indexing technique is, aparently, not torchscript
-        # compatible and will need to be reworked at some point. torchscript does not like
-        # indexing.
-        #
-        # I suggest ditching the vector indexing and replacing it with
-        # flatten + index_select on the restrict pass, and
-        # scatter on the inverse pass.
-
-        mask = halting_probabilities[revised_mesh.unbind(-1)] < 1 - 0.001
-
+        self.batch_dim = batch_dims
         self.shape = halting_probabilities.shape
+        self.index = index
         self.mask = mask
-        self.mesh = revised_mesh
 
 
 class Subaccumulator:
@@ -157,7 +167,6 @@ class Subaccumulator:
         self.Residuals = Residuals
         self.Output = Output
 
-@torch.jit.script
 class Batch_Buffer():
     """
     A small accumulator in which information important
@@ -196,9 +205,9 @@ class Batch_Buffer():
 
     def set_from_subaccumulator(self, update: Subaccumulator):
         """Updates the accumulator with the results from a particular subbatch"""
-        self.Halting_Probabilities = self.Map.inverse(self.Halting_Probabilities, update.Halting_Probabilities)
-        self.Residuals = self.Map.inverse(self.Residuals, update.Residuals)
-        self.Output = self.Map.inverse(self.Output, update.Output)
+        self.Halting_Probabilities = self.Map.update(self.Halting_Probabilities, update.Halting_Probabilities)
+        self.Residuals = self.Map.update(self.Residuals, update.Residuals)
+        self.Output = self.Map.update(self.Output, update.Output)
         self.Map = Adaptive_Map(self.Halting_Probabilities)
 
     def update(self,

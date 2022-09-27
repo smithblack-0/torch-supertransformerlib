@@ -12,12 +12,12 @@ class test_AdaptiveMap(unittest.TestCase):
         halted_probabilities = torch.tensor([[0.0, 0.0],[0.1, 1.0], [1.0, 1.0]])
         map = Adaptive.Adaptive_Map(halted_probabilities)
 
-        expected_mapping = torch.tensor([[[0, 0], [0, 1]],[[1,0],[1,1]]])
-        self.assertTrue(torch.all(map.mesh == expected_mapping))
+        expected_mapping = torch.tensor([0, 1])
+        self.assertTrue(torch.all(map.index == expected_mapping))
 
         expected_mask = torch.tensor([[True, True], [True, False]])
-        print(expected_mask.shape)
-        print(map.mask.shape)
+        print(expected_mask)
+        print(map.mask)
         self.assertTrue(torch.all(map.mask == expected_mask))
     def test_tensor_map_simple(self):
         """Test the map can restrict and update some simple tensor"""
@@ -30,7 +30,7 @@ class test_AdaptiveMap(unittest.TestCase):
         self.assertTrue(torch.all(expected_restricted == restricted))
 
         update = torch.zeros_like(restricted)
-        updated = map.inverse(halted_probabilities, update)
+        updated = map.update(halted_probabilities, update)
         self.assertTrue(torch.all(expected_updated == updated))
     def test_tensor_map_complex(self):
         """Test that tensor map still performs when extra dimensions are involved beyond the query dim"""
@@ -39,13 +39,13 @@ class test_AdaptiveMap(unittest.TestCase):
         map = Adaptive.Adaptive_Map(halting_probabilities)
 
         restricted = map.restrict(tensor)
-        update = map.inverse(tensor, restricted)
+        update = map.update(tensor, restricted)
     def test_torchscript_compiles(self):
         halting_probabilities = torch.clamp(2*torch.rand([10, 20, 30]), 0, 1)
         map_func = torch.jit.script(Adaptive.Adaptive_Map)
         map = map_func(halting_probabilities)
         restricted = map.restrict(halting_probabilities)
-        updated = map.inverse(halting_probabilities, restricted)
+        updated = map.update(halting_probabilities, restricted)
     def test_torchscript_metacompiles(self):
 
         @torch.jit.script
