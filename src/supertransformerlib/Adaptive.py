@@ -37,7 +37,7 @@ from collections import namedtuple
 from . import Core
 from . import Attention
 
-
+@torch.jit.script
 class Adaptive_Map():
     """'
     A small class capable of mapping from and to unhalted
@@ -56,8 +56,8 @@ class Adaptive_Map():
         When restricting, it restricts the output to
         a flat batch of only unhalted channels.
 
-        :param tensor: Tensor to map into restricted space
-        :return: The tensor, mapped into restricted space.
+        :param tensor: Tensor to map into restricted space. Should be shape (...batch, query, Qptional[...more])
+        :return: The tensor, mapped into restricted space. Will look like (flatbatch, query, Optional[...more])
         """
         tensor = self._flatten_batch(tensor)
         return tensor[self.index]
@@ -74,6 +74,7 @@ class Adaptive_Map():
 
         #Expand mask to match shape
         mask = self.mask
+        tensor = tensor.clone()
         tensor = self._flatten_batch(tensor)
         if mask.dim() < len(self.shape):
             #Figure out what the expansion shape is,
@@ -102,12 +103,10 @@ class Adaptive_Map():
 
     def __init__(self,
                  halting_probabilities: torch.Tensor,
-                 parallization: int = 0,
                  ):
         """
 
         :param halting_probabilities: A tensor
-        :param parallization:
         """
 
         #Figure out the number of batch dimensions.
@@ -123,7 +122,7 @@ class Adaptive_Map():
         unhalted_batches = unhalted_batches.flatten()
         index = torch.arange(unhalted_batches.shape[0], device=unhalted_batches.device).masked_select(unhalted_batches)
 
-        #Generate the remaining mask.
+        #Generate the mask.
 
         mask = halting_probabilities.flatten(0, batch_dims)
         mask = mask[index]
@@ -136,7 +135,7 @@ class Adaptive_Map():
         self.index = index
         self.mask = mask
 
-
+@torch.jit.script
 class Subaccumulator:
     """
     A subset of the entire batch, containing
@@ -167,25 +166,39 @@ class Subaccumulator:
         self.Residuals = Residuals
         self.Output = Output
 
-class Batch_Buffer():
+@torch.jit.script
+class Adaptive_Translator():
     """
-    A small accumulator in which information important
-    to the adaptive halting process may be stored away.
+    A buffer and a map, the class keepts track
+    of what batches and queries are and are not
+    halted and performs translation between
+    batch and unhalted domain.
 
-    This class is capable of restricting itself down
-    to unhalted batches and restoring itself as well.
+    The batch domaim consists of everything being provided, while
+    the unhalted domain consists of only those entries which are
+    not batched.
+
+    A buffer is created on start, holding the requirements
+    for performing adaptive halting, and from which information
+    can be drawn for a round. Alternatively, a tensor can be the
+    draw source for mapping so long as it is the case the tensor
+    matches the buffer shape.
+
+    After processing, the update functions will then update
+    the original tensor or buffer, while carrying over halted
+    channels instead.
     """
-    def is_halted(self):
+    def is_done(self):
         return torch.all(self.Halting_Probabilities >= 1 - 0.001)
+
     @staticmethod
-    def start_buffer(word_embeddings: torch.Tensor, embedding_length: Optional[int] = None):
+    def start_buffer(word_embeddings: torch.Tensor, embedding_length: Optional[int] = None)->"Adaptive_Translator":
         """Starts a buffer. If the output dim is none, it is expected the
         embed dim and output dim are the same
         :param word_embeddings: A word embedding tensor. Used to find out shapes
         :param embedding_length: Optional. An embedding length. If the output embedding is different
         than the input embedding this may be set. Else, leave alone.
         """
-
 
         halting_probabilities = torch.zeros(word_embeddings.shape[:-1], device=word_embeddings.device)
         residuals = torch.zeros(word_embeddings.shape[:-1], device=word_embeddings.device)
@@ -194,7 +207,28 @@ class Batch_Buffer():
         else:
             shape = list(word_embeddings.shape)
         output = torch.zeros(shape, device=word_embeddings.device)
-        return Batch_Buffer(halting_probabilities, residuals, output)
+        return Adaptive_Translator(halting_probabilities, residuals, output)
+
+    def get_from_tensor(self, tensor: torch.Tensor)->torch.Tensor:
+        """
+        Restricts a tensor of batch-query shape to be of exactly
+        the same shape as the unhalted batches. Unused elements are
+        just excluded.
+
+        :param tensor: A tensor in [...batch, query, ..other] shape
+        :return: A reshaped tensor, in [flatbatch, query, ...other] shape
+        """
+        return self.Map.restrict(tensor)
+    def set_to_tensor(self, tensor: torch.Tensor, update: torch.Tensor)->torch.Tensor:
+        """
+        Accepts the original tensor and a unhalted-restricted tensor,
+        then updates the original with the update respecting masks.
+
+        :param tensor: An original tensor
+        :param update: An update developed from the original tensor
+        :return: An updated tensor
+        """
+        return self.Map.update(tensor, update)
 
     def get_subaccumulator(self)->Subaccumulator:
         """Gets a subaccumulator which contains the unhalted entries."""
@@ -224,7 +258,7 @@ class Batch_Buffer():
             Residuals = self.Residuals
         if Output is None:
             Output = self.Output
-        return Batch_Buffer(Halting_Probabilities, Residuals, Output)
+        return Adaptive_Translator(Halting_Probabilities, Residuals, Output)
 
     def __init__(self,
                 Halting_Probabilities: torch.Tensor,

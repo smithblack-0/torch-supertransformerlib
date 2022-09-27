@@ -97,7 +97,7 @@ class test_Adaptive_Attention(unittest.TestCase):
         value = torch.randn([1, 5, 32])
         layer = Adaptive.Adaptive_Attention(32, 32, 32, 5, 6, 7)
 
-        buffer = Adaptive.Batch_Buffer.start_buffer(query)
+        buffer = Adaptive.Adaptive_Translator.start_buffer(query)
         accumulator = buffer.get_subaccumulator()
 
         #Call
@@ -110,7 +110,7 @@ class test_Adaptive_Attention(unittest.TestCase):
         value = torch.randn([10, 5, 64])
         layer = Adaptive.Adaptive_Attention(32, 48, 64, 5, 6, 7)
 
-        buffer = Adaptive.Batch_Buffer.start_buffer(query, 64)
+        buffer = Adaptive.Adaptive_Translator.start_buffer(query, 64)
         accumulator = buffer.get_subaccumulator()
 
         new_accumulator = layer(accumulator, query, key, value)
@@ -123,7 +123,7 @@ class test_Adaptive_Attention(unittest.TestCase):
         value = torch.randn([1, 5, 64])
         layer = Adaptive.Adaptive_Attention(32, 48, 64, 5, 6, 7)
 
-        buffer = Adaptive.Batch_Buffer.start_buffer(query, 64)
+        buffer = Adaptive.Adaptive_Translator.start_buffer(query, 64)
         buffer = buffer.update(torch.ones([1, 5]))
         accumulator = buffer.get_subaccumulator()
 
@@ -138,7 +138,7 @@ class test_Adaptive_Attention(unittest.TestCase):
         value = torch.randn([10, 5, 64])
         layer = Adaptive.Adaptive_Attention(32, 48, 64, 5, 6, 7)
 
-        buffer = Adaptive.Batch_Buffer.start_buffer(query, 64)
+        buffer = Adaptive.Adaptive_Translator.start_buffer(query, 64)
         buffer = buffer.update(0.9*torch.ones([10, 5]))
         accumulator = buffer.get_subaccumulator()
 
@@ -168,11 +168,11 @@ class test_Adaptive_Attention_Integration(unittest.TestCase):
                 self.attn = Adaptive.Adaptive_Attention(32, 64, 64, 4, 4, 4)
 
             def forward(self, batch_mockup, key_mockup):
-                buffer = Adaptive.Batch_Buffer.start_buffer(batch_mockup, 64)
-                while not buffer.is_halted():
+                buffer = Adaptive.Adaptive_Translator.start_buffer(batch_mockup, 64)
+                while not buffer.is_done():
                     subbatch = buffer.get_subaccumulator()
-                    subquery = buffer.Map.restrict(batch_mockup)
-                    subkey = buffer.Map.restrict(key_mockup)
+                    subquery = buffer.g(batch_mockup)
+                    subkey = buffer.get_unhalted_from_tensor(batch_mockup)
 
                     update = self.attn(subbatch, subquery, subkey, subkey)
                     buffer.set_from_subaccumulator(update)
@@ -228,7 +228,7 @@ class test_Adaptive_Attention_Integration(unittest.TestCase):
 
         print("torchscript cpu profiling", prof.key_averages().table())
 
-     @unittest.skipUnless(torch.cuda.is_available(), "gpu test requires valid gpu install")
+    @unittest.skipUnless(torch.cuda.is_available(), "gpu test requires valid gpu install")
     def test_gpu_as_torchscript(self):
 
         layer = self.get_test_mechanism()
