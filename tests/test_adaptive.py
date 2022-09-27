@@ -1,6 +1,8 @@
 import torch
 import unittest
 from src.supertransformerlib import Adaptive
+from torch.profiler import profile, record_function, ProfilerActivity
+
 
 class test_AdaptiveMap(unittest.TestCase):
     """
@@ -38,38 +40,47 @@ class test_AdaptiveMap(unittest.TestCase):
         tensor = torch.randn([10, 20, 30, 5, 6])
         map = Adaptive.Adaptive_Map(halting_probabilities)
 
+
         restricted = map.restrict(tensor)
+        restricted = -torch.ones_like(restricted)
         update = map.update(tensor, restricted)
+
+        #Check that updates are not occuring when halted
+        halted = halting_probabilities >= 1 - 0.001
+        halted = halted.unsqueeze(-1).unsqueeze(-1)
+        halted = halted.expand([-1, -1, -1, 5, 6])
+        unhalted = torch.logical_not(halted)
+
+        #Any updated with a halted probability should not have updated
+        orig = tensor.masked_select(halted)
+        final = update.masked_select(halted)
+        self.assertTrue(torch.all(orig == final), "When halted probabilities were present, update occurred.")
+
+        #The updates with an unhalted probability should now be -1,
+        #which is not within the torch.rand [0, 1] domain.
+        orig = tensor.masked_select(unhalted)
+        final = update.masked_select(unhalted)
+        self.assertTrue(torch.all(orig != final))
     def test_torchscript_compiles(self):
+        """Test if torchscript is willing to do a proper update"""
         halting_probabilities = torch.clamp(2*torch.rand([10, 20, 30]), 0, 1)
         map_func = torch.jit.script(Adaptive.Adaptive_Map)
         map = map_func(halting_probabilities)
         restricted = map.restrict(halting_probabilities)
         updated = map.update(halting_probabilities, restricted)
     def test_torchscript_metacompiles(self):
+        """Test if torchscript will do updates when indirection occurs. """
+        #This test exists because torchscript was refusing to do vector
+        #indexing. That is, indexing of nature tensor[index.unbind(-1)]
+        #did not work.
 
         @torch.jit.script
         def makemap(halting_probs):
             return Adaptive.Adaptive_Map(halting_probs)
         map = makemap(torch.rand([10, 10, 10]))
-
-
-class test_Buffer(unittest.TestCase):
-    """
-    Test the ability of the buffer to function
-    correctly
-    """
-    def test_torchscript(self):
-        @torch.jit.script
-        def makemap(hprobs):
-            return Adaptive.Adaptive_Map(hprobs)
-
-        cls = torch.jit.script(Adaptive.Batch_Buffer)
-
-        @torch.jit.script
-        def make_buffer(hprobs):
-            return Adaptive.Batch_Buffer.start_buffer(hprobs)
-        make_buffer(torch.rand([10, 10, 10]))
+        tensor = torch.randn([10, 10, 10, 30])
+        restriction = map.restrict(tensor)
+        update = map.update(tensor, restriction)
 
 
 
@@ -150,51 +161,12 @@ class test_Adaptive_Attention_Integration(unittest.TestCase):
     can perform adaptive attention over something like a batch
     """
 
-    def test_mechanism_basic(self):
-        """
-        Test that mapping and halting may be elegantly performed.
-
-        The logic here test ability to elegantly remap keys and
-        perform attention until halted.
-        """
-        batch_mockup = torch.randn([20, 20, 10, 32])
-        key_mockup = torch.randn([20, 20, 10, 64])
-        layer_mockup = Adaptive.Adaptive_Attention(32, 64, 64, 4, 4, 4)
-
-        buffer = Adaptive.Batch_Buffer.start_buffer(batch_mockup, 64)
-        while not buffer.is_halted():
-            subbatch = buffer.get_subaccumulator()
-            subquery = buffer.Map.restrict(batch_mockup)
-            subkey = buffer.Map.restrict(key_mockup)
-
-            update = layer_mockup(subbatch, subquery, subkey, subkey)
-            buffer.set_from_subaccumulator(update)
-    @unittest.skipUnless(torch.cuda.is_available(), "gpu test requires valid gpu install")
-    def test_mechanism_cuda(self):
-
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-
-        batch_mockup = torch.randn([20, 20, 10, 32]).to(device)
-        key_mockup = torch.randn([20, 20, 10, 64]).to(device)
-        layer_mockup = Adaptive.Adaptive_Attention(32, 64, 64, 4, 4, 4).to(device)
-
-        buffer = Adaptive.Batch_Buffer.start_buffer(batch_mockup, 64)
-        count = 0
-        while not buffer.is_halted():
-            count += 1
-            subbatch = buffer.get_subaccumulator()
-            subquery = buffer.Map.restrict(batch_mockup)
-            subkey = buffer.Map.restrict(key_mockup)
-
-            update = layer_mockup(subbatch, subquery, subkey, subkey)
-            buffer.set_from_subaccumulator(update)
-    def test_mechanism_as_torchscript(self):
-        """Test that torchscript compilation is functional"""
-        class test_torchscript(torch.nn.Module):
+    def get_test_mechanism(self)->torch.nn.Module:
+        class test_mechanism(torch.nn.Module):
             def __init__(self, q_query, q_key, q_value, q_confidence, q_assembly, heads):
                 super().__init__()
                 self.attn = Adaptive.Adaptive_Attention(32, 64, 64, 4, 4, 4)
+
             def forward(self, batch_mockup, key_mockup):
                 buffer = Adaptive.Batch_Buffer.start_buffer(batch_mockup, 64)
                 while not buffer.is_halted():
@@ -206,24 +178,63 @@ class test_Adaptive_Attention_Integration(unittest.TestCase):
                     buffer.set_from_subaccumulator(update)
                 return buffer
 
+        layer_mockup = test_mechanism(32, 64, 64, 4, 4, 4)
+        return layer_mockup
+
+    def get_test_tensors(self):
         batch_mockup = torch.randn([20, 20, 10, 32])
         key_mockup = torch.randn([20, 20, 10, 64])
-        layer_mockup = test_torchscript(32, 64, 64, 4, 4, 4)
-        layer_mockup = torch.jit.script(layer_mockup)
-        layer_mockup(batch_mockup, key_mockup)
+        return batch_mockup, key_mockup
 
-    def profile_cpu(self):
+    def test_mechanism_cpu(self):
+        """
+        Test that mapping and halting may be elegantly performed.
 
-        from torch.profiler import profile, record_function,ProfilerActivity
+        The logic here test ability to elegantly remap keys and
+        perform attention until halted.
+        """
+
+        layer = self.get_test_mechanism()
+        batch, key = self.get_test_tensors()
         with profile(activities=[ProfilerActivity.CPU], record_shapes=True) as prof:
-            with record_function("model_inference"):
-                self.test_mechanism_basic()
+            with record_function("basic_cpu_profiling"):
+                buffer = layer(batch, key)
+        print("basic cpu profiling", prof.key_averages().table())
 
-        print(prof.key_averages().table())
-    def profile_gpu(self):
-        from torch.profiler import profile, record_function, ProfilerActivity
+
+    @unittest.skipUnless(torch.cuda.is_available(), "gpu test requires valid gpu install")
+    def test_mechanism_cuda(self):
+
+        layer = self.get_test_mechanism().to("cuda")
+        batch, key = self.get_test_tensors()
+        batch = batch.to("cuda")
+        key = key.to("cuda")
         with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA], record_shapes=True) as prof:
-            with record_function("model_inference"):
-                self.test_mechanism_cuda()
+            with record_function("basic_gpu_profiling"):
+                layer(batch, key)
 
-        print(prof.key_averages().table())
+        print("basic gpu profiling", prof.key_averages().table())
+
+
+    def test_cpu_as_torchscript(self):
+        """Test that torchscript compilation is functional"""
+        layer = self.get_test_mechanism()
+        layer = torch.jit.script(layer)
+        batch, key = self.get_test_tensors()
+
+        with profile(activities=[], record_shapes=True) as prof:
+            with record_function("cpu_torchscript"):
+                buffer = layer(batch, key)
+
+        print("torchscript cpu profiling", prof.key_averages().table())
+
+     @unittest.skipUnless(torch.cuda.is_available(), "gpu test requires valid gpu install")
+    def test_gpu_as_torchscript(self):
+
+        layer = self.get_test_mechanism()
+        layer = torch.jit.script(layer)
+        batch, key = self.get_test_tensors()
+        with profile(activities=[ProfilerActivity.CPU], record_shapes=True) as prof:
+            with record_function("basic_cpu_profiling"):
+                buffer = layer(batch, key)
+        print("basic cpu profiling", prof.key_averages().table())
