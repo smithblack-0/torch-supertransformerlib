@@ -11,8 +11,8 @@ import torch
 import torch.nn
 from torch import nn
 
-
 from . import Glimpses
+
 
 @torch.jit.script
 class Config():
@@ -66,15 +66,14 @@ class Config():
 
     """
 
-
-    def rebalance_probability(self, tensor: torch.Tensor)->torch.Tensor:
+    def rebalance_probability(self, tensor: torch.Tensor) -> torch.Tensor:
         """Takes a tensor which consists of positive weights and turns it into something that sums up to one"""
         return tensor / tensor.sum(dim=-1).unsqueeze(-1)
 
     def _process_config_options(self,
                                 configuration: torch.Tensor,
                                 top_k: Optional[int],
-                                top_p: Optional[float])->torch.Tensor:
+                                top_p: Optional[float]) -> torch.Tensor:
         """
         A support function. It handles probabity conversion for
         top_p and top_k.
@@ -83,7 +82,6 @@ class Config():
         if top_k is not None and top_p is not None:
             raise ValueError("Top_k and top_p cannot both be active at the same time. Please leave one as None")
 
-
         if top_k is not None:
             # Create the top k sparse configuration
             #
@@ -91,7 +89,7 @@ class Config():
             # a mask, then masking the configuration and performing
             # the probabilistic change. Then we rebalance the probabilites
 
-            _, indices = torch.topk(configuration,top_k, dim=-1)
+            _, indices = torch.topk(configuration, top_k, dim=-1)
             indices = indices.unsqueeze(-1)
             mask = torch.arange(self.ensemble_width)
             mask = indices == mask
@@ -100,7 +98,7 @@ class Config():
             configuration = self.rebalance_probability(configuration)
 
         elif top_p is not None:
-            ### Develop the top-p driven case
+            # Develop the top-p driven case
             #
             # This will consist of finding by cumulative sums the
             # sorted layer at which we transition above the top
@@ -151,6 +149,7 @@ class Config():
             config = torch.softmax(config, dim=-1)
 
         return config
+
     def __init__(self,
                  config: torch.Tensor,
                  top_k: Optional[int] = None,
@@ -195,6 +194,7 @@ class Kernel(nn.Module):
     By default, it will be setup as an ensemble that spits out the
     same kernel it is given. It can then be further modified using update_config.
     """
+
     @property
     def ensemble_width(self):
         return self.kernel.shape[0]
@@ -205,14 +205,13 @@ class Kernel(nn.Module):
         Update the given kernel with the given config.
         """
 
-        #Temporary variables needed for torchscript to work right.
+        # Temporary variables needed for torchscript to work right.
         my_tags = self.tags
         config_tags = config.tags
         if torch.jit.isinstance(my_tags, List[str]) and torch.jit.isinstance(config_tags, List[str]):
-            #Finding if the two tag groups share an element is a great
-            #canidate for set. Unforunately, torchscript does not support it.
-            #so we are using a loop for now. Do not use too many tags I guess?
-
+            # Finding if the two tag groups share an element is a great
+            # canidate for set. Unforunately, torchscript does not support it.
+            # so we are using a loop for now. Do not use too many tags I guess?
 
             is_contained = False
             for tag in my_tags:
@@ -273,12 +272,12 @@ class Kernel(nn.Module):
         return output
 
 
-
 class _KernelSpace(nn.Module):
     """
     This exists only to get
     around certain torchscript limitations.
     """
+
 
 class KernelSpace(_KernelSpace):
     """
@@ -352,6 +351,7 @@ class KernelSpace(_KernelSpace):
 
     ```
     """
+
     # The actual responsibilities of this particular layer are actually
     # extremely limited. Ultimately, all that it is responsible for doing
     # is tracking down further sublayers to update when given particular
@@ -360,14 +360,14 @@ class KernelSpace(_KernelSpace):
     @torch.jit.export
     def update_children(self, config: Config):
         """Updates the config for all immediate children"""
-        #This does a recursive search for kernels
-        #and sub kernelspaces. The kernelspaces see
-        #their update_config method called, causing recursion. The
-        #kernels will see their update config method called, updating
-        #the actual config
+        # This does a recursive search for kernels
+        # and sub kernelspaces. The kernelspaces see
+        # their update_config method called, causing recursion. The
+        # kernels will see their update config method called, updating
+        # the actual config
         #
-        #Config is stored entirely on the kernels. This layer just
-        #tracks down where it should go.
+        # Config is stored entirely on the kernels. This layer just
+        # tracks down where it should go.
         for child in self.children():
             if isinstance(child, Kernel):
                 if child.is_ensemble:
@@ -379,22 +379,20 @@ class KernelSpace(_KernelSpace):
         for child in self.children():
             if isinstance(child, Kernel):
                 child.update_config(config)
-            if hasattr(child, "_is_KernelSpace"): #We cannot use isinstance(child, KernelSpace) due to torchscript limitations.
+            if hasattr(child,
+                       "_is_KernelSpace"):  # We cannot use isinstance(child, KernelSpace) due to torchscript
+                # limitations.
                 child.update_descendents(config)
-
-
 
     def __init__(self):
         super().__init__()
         self._is_KernelSpace = True
 
+
 class Utility:
     """ A place for utility methods to belong"""
-    def get_group(self, ensemble_width, ):
-        """"""
 
-
-    def standardize_input(self, input: Union[torch.Tensor, List[int], int])->torch.Tensor:
+    def standardize_input(self, input: Union[torch.Tensor, List[int], int]) -> torch.Tensor:
         """
         Convert an input in one of three formats into a common single format of tensor
         Sanitize and throw errors if there is a problem
@@ -405,6 +403,7 @@ class Utility:
             input = [input]
         output = torch.tensor(input, dtype=torch.int64)
         return output
+
 
 class Linear(Utility, KernelSpace):
     """
@@ -513,7 +512,7 @@ class Linear(Utility, KernelSpace):
         :param tags: Any tags to restrict config updates to. Passed on to our kernels.
         """
 
-        #Peform standardization
+        # Peform standardization
         if parallel is None:
             parallel = []
         if dynamics is None:
@@ -523,7 +522,7 @@ class Linear(Utility, KernelSpace):
         output_shape = self.standardize_input(output_shape)
         parallel = self.standardize_input(parallel)
 
-        #Begin developing kernel shapes and conversions
+        # Begin developing kernel shapes and conversions
 
         matrix_rows = input_shape.prod().unsqueeze(-1)
         matrix_columns = output_shape.prod().unsqueeze(-1)
@@ -535,16 +534,15 @@ class Linear(Utility, KernelSpace):
         input_autoshape_mapping = (input_shape, matrix_rows)
         output_autoshape_mapping = (matrix_columns, output_shape)
 
-        #Introduce modifications to account for parallelization.
-        #This consists of additional indepedent dimensions
-        #at the front of the matrix and bias
+        # Introduce modifications to account for parallelization.
+        # This consists of additional indepedent dimensions
+        # at the front of the matrix and bias
 
         matrix_shape = torch.concat([parallel, matrix_shape], dim=0)
         if use_bias:
             bias_shape = torch.concat([parallel, bias_shape])
 
-        #Handle dynamics.
-
+        # Handle dynamics.
 
         if dynamics > 0:
             ensemble_width = dynamics
@@ -555,10 +553,9 @@ class Linear(Utility, KernelSpace):
         else:
             is_ensembled = False
 
-
         super().__init__()
 
-        #Generate actual kernels
+        # Generate actual kernels
 
         matrix_kernel = torch.empty(matrix_shape.tolist())
         torch.nn.init.kaiming_uniform_(matrix_kernel, math.sqrt(5))
@@ -570,7 +567,7 @@ class Linear(Utility, KernelSpace):
             bias_kernel = nn.Parameter(bias_kernel)
             bias_kernel = Kernel(bias_kernel, is_ensembled)
 
-        #Register kernels and deployment details
+        # Register kernels and deployment details
 
         self.use_bias = use_bias
         self.is_ensembled = is_ensembled
@@ -587,7 +584,7 @@ class Linear(Utility, KernelSpace):
         input_shape, row_length = self.input_map_reference
         column_length, output_shape = self.output_map_reference
 
-        flattened_input = Glimpses.reshape(tensor,input_shape, row_length)
+        flattened_input = Glimpses.reshape(tensor, input_shape, row_length)
         flattened_input = flattened_input.unsqueeze(-1)
 
         if self.use_bias:
@@ -597,4 +594,3 @@ class Linear(Utility, KernelSpace):
             flattened_output = torch.matmul(self.matrix_kernel(), flattened_input)
         restored_output = Glimpses.reshape(flattened_output, column_length, output_shape)
         return restored_output
-
