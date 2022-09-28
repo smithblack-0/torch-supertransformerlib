@@ -6,36 +6,10 @@ algorithms.
 
 """
 import math
-
-"""
-Design:
-
-* Two domains: The state and the instance. Have different dimensions. 
-* State domain: 
-*       Generated as we travel along. 
-*       Collective across word embedding and across generation instances.
-*       Combined with instance domain for compound domain
-* Instance Domain:
-*       The actual output we are looking for
-*       Consists of a superposition of things from the state domain
-*       Outputs and residuals generally end up here
-*       Combined with state domain for compound domain.
-* Compound Domain:
-*       Probabilities indicating how to put state domain together to make something in instance domain
-*       Also used to perform state updates sometimes.
-
-
-
-"""
-import dataclasses
-from typing import Optional, Union, List, Tuple
+from typing import Optional, Union, List
 
 import torch
-from torch import nn
-from collections import namedtuple
-
 from . import Core
-from . import Attention
 
 
 @torch.jit.script
@@ -171,7 +145,7 @@ class Subaccumulator:
 
 
 @torch.jit.script
-class Adaptive_Translator():
+class AdaptiveTranslator():
     """
     A buffer and a map, the class keepts track
     of what batches and queries are and are not
@@ -202,7 +176,7 @@ class Adaptive_Translator():
         return self._Map
 
     @staticmethod
-    def start_buffer(word_embeddings: torch.Tensor, embedding_length: Optional[int] = None) -> "Adaptive_Translator":
+    def start_buffer(word_embeddings: torch.Tensor, embedding_length: Optional[int] = None) -> "AdaptiveTranslator":
         """Starts a buffer. If the output dim is none, it is expected the
         embed dim and output dim are the same
         :param word_embeddings: A word embedding tensor. Used to find out shapes
@@ -217,7 +191,7 @@ class Adaptive_Translator():
         else:
             shape = list(word_embeddings.shape)
         output = torch.zeros(shape, device=word_embeddings.device)
-        return Adaptive_Translator(halting_probabilities, residuals, output)
+        return AdaptiveTranslator(halting_probabilities, residuals, output)
 
     def get_subbatch(self) -> Subaccumulator:
         """Gets a subaccumulator which contains the unhalted entries."""
@@ -247,7 +221,7 @@ class Adaptive_Translator():
             Residuals = self.Residuals
         if Output is None:
             Output = self.Output
-        return Adaptive_Translator(Halting_Probabilities, Residuals, Output)
+        return AdaptiveTranslator(Halting_Probabilities, Residuals, Output)
 
     def __init__(self,
                  Halting_Probabilities: torch.Tensor,
@@ -260,7 +234,7 @@ class Adaptive_Translator():
         self.Output = Output
 
 
-class Adaptive_Attention(Core.KernelSpace):
+class AdaptiveAttention(Core.KernelSpace):
     """
     A very special variety of attention mechanism, this
     works together with halting probabilities to

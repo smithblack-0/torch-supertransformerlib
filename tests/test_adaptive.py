@@ -87,7 +87,7 @@ class test_AdaptiveMap(unittest.TestCase):
 class test_Adaptive_Attention(unittest.TestCase):
     def test_constructor(self):
         """Test the constructor functions reasonably well"""
-        Adaptive.Adaptive_Attention(10, 20, 30, 5, 5, 5)
+        Adaptive.AdaptiveAttention(10, 20, 30, 5, 5, 5)
     def test_call_simple(self):
         """Test if call works in the simplest of cases"""
         #Setup
@@ -95,9 +95,9 @@ class test_Adaptive_Attention(unittest.TestCase):
         query = torch.randn([1, 5, 32])
         key = torch.randn([1, 5, 32])
         value = torch.randn([1, 5, 32])
-        layer = Adaptive.Adaptive_Attention(32, 32, 32, 5, 6, 7)
+        layer = Adaptive.AdaptiveAttention(32, 32, 32, 5, 6, 7)
 
-        buffer = Adaptive.Adaptive_Translator.start_buffer(query)
+        buffer = Adaptive.AdaptiveTranslator.start_buffer(query)
         accumulator = buffer.get_subbatch()
 
         #Call
@@ -108,9 +108,9 @@ class test_Adaptive_Attention(unittest.TestCase):
         query = torch.randn([10, 5, 32])
         key = torch.randn([10, 5, 48])
         value = torch.randn([10, 5, 64])
-        layer = Adaptive.Adaptive_Attention(32, 48, 64, 5, 6, 7)
+        layer = Adaptive.AdaptiveAttention(32, 48, 64, 5, 6, 7)
 
-        buffer = Adaptive.Adaptive_Translator.start_buffer(query, 64)
+        buffer = Adaptive.AdaptiveTranslator.start_buffer(query, 64)
         accumulator = buffer.get_subbatch()
 
         new_accumulator = layer(accumulator, query, key, value)
@@ -121,9 +121,9 @@ class test_Adaptive_Attention(unittest.TestCase):
         query = torch.randn([1, 5, 32])
         key = torch.randn([1, 5, 48])
         value = torch.randn([1, 5, 64])
-        layer = Adaptive.Adaptive_Attention(32, 48, 64, 5, 6, 7)
+        layer = Adaptive.AdaptiveAttention(32, 48, 64, 5, 6, 7)
 
-        buffer = Adaptive.Adaptive_Translator.start_buffer(query, 64)
+        buffer = Adaptive.AdaptiveTranslator.start_buffer(query, 64)
         buffer = buffer._manual_update(torch.ones([1, 5]))
         accumulator = buffer.get_subbatch()
 
@@ -136,9 +136,9 @@ class test_Adaptive_Attention(unittest.TestCase):
         query = torch.randn([10, 5, 32])
         key = torch.randn([10, 5, 48])
         value = torch.randn([10, 5, 64])
-        layer = Adaptive.Adaptive_Attention(32, 48, 64, 5, 6, 7)
+        layer = Adaptive.AdaptiveAttention(32, 48, 64, 5, 6, 7)
 
-        buffer = Adaptive.Adaptive_Translator.start_buffer(query, 64)
+        buffer = Adaptive.AdaptiveTranslator.start_buffer(query, 64)
         buffer = buffer._manual_update(0.9 * torch.ones([10, 5]))
         accumulator = buffer.get_subbatch()
 
@@ -165,10 +165,10 @@ class test_Adaptive_Attention_Integration(unittest.TestCase):
         class test_mechanism(torch.nn.Module):
             def __init__(self, q_query, q_key, q_value, q_confidence, q_assembly, heads):
                 super().__init__()
-                self.attn = Adaptive.Adaptive_Attention(q_query, q_key, q_value, q_confidence, q_assembly, heads)
+                self.attn = Adaptive.AdaptiveAttention(q_query, q_key, q_value, q_confidence, q_assembly, heads)
 
             def forward(self, batch_mockup, key_mockup):
-                buffer: Adaptive.Adaptive_Translator = Adaptive.Adaptive_Translator.start_buffer(batch_mockup, 64)
+                buffer: Adaptive.AdaptiveTranslator = Adaptive.AdaptiveTranslator.start_buffer(batch_mockup, 64)
                 while not buffer.is_done():
 
                     subbatch = buffer.get_subbatch()
