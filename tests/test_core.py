@@ -241,7 +241,7 @@ class test_KernelSpace(unittest.TestCase):
         instance.update_children(config)
         output = instance()
 
-        self.assertTrue(output.shape == torch.Size([30, 20, 30]))
+        self.assertTrue(output.shape == torch.Size([30, 20, 30]), "problem: %s" % output.shape)
     def test_nested_kernel_updates(self):
 
 
