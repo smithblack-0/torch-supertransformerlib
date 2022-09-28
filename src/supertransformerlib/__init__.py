@@ -4,7 +4,7 @@ A library for fast, smart transformers.
 
 """
 
-__version__ = "2.0r1"
+__version__ = "2.0r2"
 
 
 from . import Glimpses # noqa
