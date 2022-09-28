@@ -503,8 +503,8 @@ class LCSA(Core.KernelSpace, Core.Utility):
         content = Glimpses.dilocal(tensor, self.kernel_width, 1, self.dilations,
                                    pad_justification=self.mode)
 
-        #Move items to front dims. Move embedding to back dim
-        #perform head projection. Restore
+        # Move items to front dims. Move embedding to back dim
+        # perform head projection. Restore
 
         query = query.transpose(-1, 0)
         content = content.transpose(-1, 0)
