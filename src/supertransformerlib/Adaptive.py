@@ -440,4 +440,3 @@ class AdaptiveAttention(Core.KernelSpace):
         residuals = accumulator.Residuals + residuals_update
         output = accumulator.Output + output_update
         return accumulator.update(halting_probabilities, residuals, output)
-
