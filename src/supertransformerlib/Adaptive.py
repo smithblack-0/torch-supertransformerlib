@@ -37,8 +37,9 @@ from collections import namedtuple
 from . import Core
 from . import Attention
 
+
 @torch.jit.script
-class Adaptive_Map():
+class AdaptiveMap:
     """'
     A small class capable of mapping from and to unhalted
     space efficiency. This improves calculation efficiency
@@ -50,6 +51,7 @@ class Adaptive_Map():
     the tensor to the unhalted domain, and an update function.
 
     '"""
+
     def transform(self, tensor: torch.Tensor) -> torch.Tensor:
         """
         When transforming, it restricts the output to
@@ -71,15 +73,15 @@ class Adaptive_Map():
         :return: The updated tensor.
         """
 
-        #Expand mask to match shape
+        # Expand mask to match shape
         mask = self.mask
         tensor = tensor.clone()
         tensor = self._flatten_batch(tensor)
         if mask.dim() < len(self.shape):
-            #Figure out what the expansion shape is,
-            #make extra dimensions, then expand mask
-            #using views.
-            shape = [-1]*mask.dim()
+            # Figure out what the expansion shape is,
+            # make extra dimensions, then expand mask
+            # using views.
+            shape = [-1] * mask.dim()
             shape += list(tensor.shape[mask.dim():])
             while mask.dim() < len(shape):
                 mask = mask.unsqueeze(-1)
@@ -90,11 +92,11 @@ class Adaptive_Map():
         tensor = self._unflatten_batch(tensor)
         return tensor
 
-    def _flatten_batch(self, tensor: torch.Tensor)->torch.Tensor:
+    def _flatten_batch(self, tensor: torch.Tensor) -> torch.Tensor:
         """Flattens all batch dimensions"""
         return tensor.flatten(0, self.batch_dim)
 
-    def _unflatten_batch(self, tensor: torch.Tensor)-> torch.Tensor:
+    def _unflatten_batch(self, tensor: torch.Tensor) -> torch.Tensor:
         """Unflatten all batch dimensions. """
         shape = list(self.shape) + list(tensor.shape[2:])
         shape = torch.Size(shape)
@@ -108,7 +110,7 @@ class Adaptive_Map():
         :param halting_probabilities: A tensor
         """
 
-        #Figure out the number of batch dimensions.
+        # Figure out the number of batch dimensions.
         batch_dims = halting_probabilities.dim() - 2
 
         # Figure out which batches are unhalted. Do this by
@@ -121,18 +123,19 @@ class Adaptive_Map():
         unhalted_batches = unhalted_batches.flatten()
         index = torch.arange(unhalted_batches.shape[0], device=unhalted_batches.device).masked_select(unhalted_batches)
 
-        #Generate the mask.
+        # Generate the mask.
 
         mask = halting_probabilities.flatten(0, batch_dims)
         mask = mask[index]
         mask = mask < 1 - 0.001
 
-        #Store away
+        # Store away
 
         self.batch_dim = batch_dims
         self.shape = halting_probabilities.shape
         self.index = index
         self.mask = mask
+
 
 @torch.jit.script
 class Subaccumulator:
@@ -140,6 +143,7 @@ class Subaccumulator:
     A subset of the entire batch, containing
     elements which are not yet halted.
     """
+
     def update(self,
                Halting_Probabilities: Optional[torch.Tensor] = None,
                Residuals: Optional[torch.Tensor] = None,
@@ -165,6 +169,7 @@ class Subaccumulator:
         self.Residuals = Residuals
         self.Output = Output
 
+
 @torch.jit.script
 class Adaptive_Translator():
     """
@@ -187,16 +192,17 @@ class Adaptive_Translator():
     the original tensor or buffer, while carrying over halted
     channels instead.
     """
+
     def is_done(self):
         """Check if everything is fully halted."""
         return torch.all(self.Halting_Probabilities >= 1 - 0.001)
 
-    def get_map(self)->Adaptive_Map:
+    def get_map(self) -> Adaptive_Map:
         """Gets the tensor mapping associated with the current halting probabilities"""
         return self._Map
 
     @staticmethod
-    def start_buffer(word_embeddings: torch.Tensor, embedding_length: Optional[int] = None)->"Adaptive_Translator":
+    def start_buffer(word_embeddings: torch.Tensor, embedding_length: Optional[int] = None) -> "Adaptive_Translator":
         """Starts a buffer. If the output dim is none, it is expected the
         embed dim and output dim are the same
         :param word_embeddings: A word embedding tensor. Used to find out shapes
@@ -213,7 +219,7 @@ class Adaptive_Translator():
         output = torch.zeros(shape, device=word_embeddings.device)
         return Adaptive_Translator(halting_probabilities, residuals, output)
 
-    def get_subbatch(self)->Subaccumulator:
+    def get_subbatch(self) -> Subaccumulator:
         """Gets a subaccumulator which contains the unhalted entries."""
         halting_probs = self._Map.transform(self.Halting_Probabilities)
         residuals = self._Map.transform(self.Residuals)
@@ -228,10 +234,10 @@ class Adaptive_Translator():
         self._Map = Adaptive_Map(self.Halting_Probabilities)
 
     def _manual_update(self,
-               Halting_Probabilities: Optional[torch.Tensor] = None,
-               Residuals: Optional[torch.Tensor] = None,
-               Output: Optional[torch.Tensor] = None,
-               ):
+                       Halting_Probabilities: Optional[torch.Tensor] = None,
+                       Residuals: Optional[torch.Tensor] = None,
+                       Output: Optional[torch.Tensor] = None,
+                       ):
         """
         Updates the given entries with the new values. Anything not given stays the same.
         """
@@ -244,15 +250,14 @@ class Adaptive_Translator():
         return Adaptive_Translator(Halting_Probabilities, Residuals, Output)
 
     def __init__(self,
-                Halting_Probabilities: torch.Tensor,
-                Residuals: torch.Tensor,
-                Output: torch.Tensor,
+                 Halting_Probabilities: torch.Tensor,
+                 Residuals: torch.Tensor,
+                 Output: torch.Tensor,
                  ):
         self._Map = Adaptive_Map(Halting_Probabilities)
         self.Halting_Probabilities = Halting_Probabilities
         self.Residuals = Residuals
         self.Output = Output
-
 
 
 class Adaptive_Attention(Core.KernelSpace):
@@ -275,7 +280,6 @@ class Adaptive_Attention(Core.KernelSpace):
     be added to an existing accumulation tensor and the added entity may be
     provided next round.
     """
-
 
     def __init__(self,
                  d_query: int,
@@ -302,21 +306,21 @@ class Adaptive_Attention(Core.KernelSpace):
 
         d_head = d_query // heads
 
-        #Attention projectors
+        # Attention projectors
         self.attn_query_projector = Core.Linear(d_query, [heads, d_head], parallelization, dynamics)
         self.attn_key_projector = Core.Linear(d_key, [heads, d_head], parallelization, dynamics)
 
-        #Confidence projectors
+        # Confidence projectors
 
         self.confidence_query_projector = Core.Linear(d_query, [heads, d_confidence], parallelization, dynamics)
         self.confidence_key_projector = Core.Linear(d_key, [heads, d_confidence], parallelization, dynamics)
 
-        #Assembly projectors
+        # Assembly projectors
 
         self.assembly_query_projector = Core.Linear(d_query, [heads, d_assembly], parallelization, dynamics)
         self.assembly_key_projector = Core.Linear(d_key, [heads, d_assembly], parallelization, dynamics)
 
-        #Value and deheading projectors.
+        # Value and deheading projectors.
 
         self.value_projection = Core.Linear(d_value, [heads, d_head], parallelization, dynamics)
         self.dehead = Core.Linear([heads, d_head], d_value, parallelization, dynamics)
@@ -366,20 +370,18 @@ class Adaptive_Attention(Core.KernelSpace):
                 key: torch.Tensor,
                 value: torch.Tensor,
                 mask: Optional[torch.Tensor] = None,
-                )->Subaccumulator:
-
-        #Generate the heads
+                ) -> Subaccumulator:
+        # Generate the heads
 
         attn_query, attn_key, attn_value = self.make_attn_heads(query, key, value)
         confidence_query, confidence_key = self.make_confidence_heads(query, key)
         assembly_query, assembly_key = self.make_assembly_heads(query, key)
 
-        #Begin working towards attention. Generate the required logits,
-        #and mask. Take care to note that the assembly and confidence logit,
-        #will be undergoing a later sum into a composite logit
+        # Begin working towards attention. Generate the required logits,
+        # and mask. Take care to note that the assembly and confidence logit,
+        # will be undergoing a later sum into a composite logit
         # and not fed directly through an activation function - as
         # such, the mask value should be 0, not negative infinity.
-
 
         attn_logits = torch.matmul(attn_query, attn_key.transpose(-1, -2))
         confidence_logits = torch.matmul(confidence_query, confidence_key.transpose(-1, -2))
@@ -389,11 +391,9 @@ class Adaptive_Attention(Core.KernelSpace):
             confidence_logits = confidence_logits.masked_fill(mask, 0)
             assembly_logits = assembly_logits.masked_fill(mask, 0)
 
-        #(..., dynamic, (par..), query, content) for all
+        # (..., dynamic, (par..), query, content) for all
 
-
-
-        #Develop primary calculation features. These consist of activating the previously defined
+        # Develop primary calculation features. These consist of activating the previously defined
         # logits - the attention logits, the confidence logits, and the assembly logits.
         #
         # Of note, we calculate two things from the assembly logits. These are the
@@ -403,241 +403,67 @@ class Adaptive_Attention(Core.KernelSpace):
         # However, it is easier for a model to turn heads on and off using sigmoids plus
         # rescaling
 
-        score = torch.softmax(attn_logits, dim=-1) #(..., head, query, content)
-        confidence = torch.sigmoid(confidence_logits.sum(dim=-1)).unsqueeze(-1) #(... head, query, 1)
-        assembly_weights = torch.sigmoid(assembly_logits.sum(dim=-1))  #(...head, query)
-        assembly_probabilities = assembly_weights/(assembly_weights.sum(dim=-2).unsqueeze(-2)+0.001) #(..., head, query)
+        score = torch.softmax(attn_logits, dim=-1)  # (..., head, query, content)
+        confidence = torch.sigmoid(confidence_logits.sum(dim=-1)).unsqueeze(-1)  # (... head, query, 1)
+        assembly_weights = torch.sigmoid(assembly_logits.sum(dim=-1))  # (...head, query)
+        assembly_probabilities = assembly_weights / (
+                    assembly_weights.sum(dim=-2).unsqueeze(-2) + 0.001)  # (..., head, query)
 
-        #The pieces developed above will be utilized to weight the attention which will occur
-        #further down the line. This develops probabilities from these weights. First, we combine
-        #all the probabilities we have to make a raw probability update, and get the update in query
-        #format. Once this is done, we figure out if the score needs adjustment to keep the total
-        #probability equal to one, calculate a scalar change which will make it happen, and rescale
-        #the current score. The residuals and halting probility update is also calculated here.
+        # The pieces developed above will be utilized to weight the attention which will occur
+        # further down the line. This develops probabilities from these weights. First, we combine
+        # all the probabilities we have to make a raw probability update, and get the update in query
+        # format. Once this is done, we figure out if the score needs adjustment to keep the total
+        # probability equal to one, calculate a scalar change which will make it happen, and rescale
+        # the current score. The residuals and halting probility update is also calculated here.
         #
         # One thing worth mentioning is the clamp adjustment. It is the solution to the problem
         # k*sum(update)+sum(original) = 1, where k is solved for. It ensures adding a probability
         # update will not exceed 1.
 
-        raw_halting_probability_update = score*confidence*assembly_probabilities.unsqueeze(-1) #(...head, query, content)
-        raw_halting_probability_update = raw_halting_probability_update.sum(-3).sum(-1) #(..., query)
+        raw_halting_probability_update = score * confidence * assembly_probabilities.unsqueeze(
+            -1)  # (...head, query, content)
+        raw_halting_probability_update = raw_halting_probability_update.sum(-3).sum(-1)  # (..., query)
 
         raw_new_halting_probability = raw_halting_probability_update + accumulator.Halting_Probabilities
-        requires_adjustment = raw_new_halting_probability > 1 - 0.001 #(..., query)
-        requires_adjustment = torch.logical_and(requires_adjustment,  raw_new_halting_probability != 1.0) #Shuts off finished.
-        clamp_adjustment = ((1-accumulator.Halting_Probabilities)/(raw_halting_probability_update + 1e-12)) #(..., query)
+        requires_adjustment = raw_new_halting_probability > 1 - 0.001  # (..., query)
+        requires_adjustment = torch.logical_and(requires_adjustment,
+                                                raw_new_halting_probability != 1.0)  # Shuts off finished.
+        clamp_adjustment = (
+                    (1 - accumulator.Halting_Probabilities) / (raw_halting_probability_update + 1e-12))  # (..., query)
 
         score = torch.where(
             requires_adjustment.unsqueeze(-1).unsqueeze(-3),
-            clamp_adjustment.unsqueeze(-1).unsqueeze(-3)*score,
-            score) #(..., head, query, content)
+            clamp_adjustment.unsqueeze(-1).unsqueeze(-3) * score,
+            score)  # (..., head, query, content)
         residuals_update = torch.where(
             requires_adjustment,
-            clamp_adjustment*raw_halting_probability_update,
-            torch.tensor(0.0, device=raw_halting_probability_update.device)) #(..., query)
+            clamp_adjustment * raw_halting_probability_update,
+            torch.tensor(0.0, device=raw_halting_probability_update.device))  # (..., query)
         halting_probability_update = torch.where(
             requires_adjustment,
             clamp_adjustment * raw_halting_probability_update,
             raw_halting_probability_update,
-        )   #(..., query)
+        )  # (..., query)
 
-        #The weird probability work is now done. Score will not overflow
-        #probability. As a result, we now proceed as normal and perform
-        #dot product attention. Then we weight the heads by the assembly
-        #weights and get the outputs.
+        # The weird probability work is now done. Score will not overflow
+        # probability. As a result, we now proceed as normal and perform
+        # dot product attention. Then we weight the heads by the assembly
+        # weights and get the outputs.
 
-        attn = torch.matmul(score*confidence, attn_value) #(..., head, query, d_value)
-        attn = attn/math.sqrt(query.shape[-1])
+        attn = torch.matmul(score * confidence, attn_value)  # (..., head, query, d_value)
+        attn = attn / math.sqrt(query.shape[-1])
 
-        output_update = attn.unsqueeze(0).transpose(0, -1).squeeze(-1) #(d_value, ..., head, query)
-        output_update = output_update*assembly_weights #(d_value, ..., head, query)
-        output_update = output_update.unsqueeze(-1).transpose(0, -1).squeeze(0) #(..., head, query, d_head)
+        output_update = attn.unsqueeze(0).transpose(0, -1).squeeze(-1)  # (d_value, ..., head, query)
+        output_update = output_update * assembly_weights  # (d_value, ..., head, query)
+        output_update = output_update.unsqueeze(-1).transpose(0, -1).squeeze(0)  # (..., head, query, d_head)
         output_update = output_update.unsqueeze(0).transpose(0, -2).squeeze(-2)
         output_update = self.dehead(output_update)
-        output_update = output_update.unsqueeze(-2).transpose(-2, 0).squeeze(0) #(..., query, d_value)
+        output_update = output_update.unsqueeze(-2).transpose(-2, 0).squeeze(0)  # (..., query, d_value)
 
-        #Run updates. Return new accumulator
+        # Run updates. Return new accumulator
 
         halting_probabilities = accumulator.Halting_Probabilities + halting_probability_update
         residuals = accumulator.Residuals + residuals_update
         output = accumulator.Output + output_update
         return accumulator.update(halting_probabilities, residuals, output)
-
-# Focus utilities. These generally help minimize computational overhead
-# by avoiding performing calculations where they are unneeded.
-
-
-class Calculate_Trash_Update(Core.KernelSpace):
-    """
-
-    Calculates an update for the so called "trash" parameter.
-
-    The trash consists of two things. First is the trash
-    probabilities. These are probabilities associated with each
-    and every state that masks their value. Second is the trash
-    can. This is where embeddings end up when trashed, and
-    can be used to encourage training of items back out of
-    the trash.
-
-    This class calculates an update to the trash probabilities
-    based on a given state update using attention. This can
-    be added to the current trash probabilities without issue.
-    Appropriate care is taken to ensure trash probability cannot
-    rise above 100 %.
-    """
-
-    def __init__(self,
-                 d_model: int,
-                 d_internal: Optional[int] = None,
-                 parallelization: Optional[Union[torch.Tensor, List[int], int]] = None,
-                 dynamics: Optional[int] = None):
-        super().__init__()
-        self.feedforward = Attention.FeedForward(d_model + d_model,
-                                                 d_internal=d_internal,
-                                                 parallelization=parallelization,
-                                                 dynamics=dynamics)
-
-        self.trash_logits = Core.Linear(d_model + d_model,
-                                          1,
-                                          parallel=parallelization,
-                                          dynamics=dynamics
-                                          )
-        self.sigmoid = nn.Sigmoid()
-
-    def forward(self, trash_probs: torch.Tensor, compound_state: torch.Tensor, compound_update: torch.Tensor)->\
-            Tuple[torch.Tensor, torch.Tensor]:
-        """
-        Calculate the trash update
-
-        :param trash_probs: The current trash probabilities, in the compound domain
-        :param compound_state: The current compound state.
-        :param state_update: The current compound state update.
-        :return:
-        """
-
-        #Generate the trash prediction
-
-        size = [-1] * state.dim()
-        size[-2] = state.shape[-2]
-        state_update = state_update.expand(size)
-
-
-        raw_trash_update = torch.concat([state, state_update], dim=-1)
-        raw_trash_update = self.feedforward(raw_trash_update)
-        raw_trash_update = self.trash_logits(raw_trash_update)
-        raw_trash_update = self.sigmoid(raw_trash_update).squeeze(-1)
-
-        # Note: Magic constant 1e-8 is present to prevent division by zero.
-        # Note: Magic constant 0.001 exists to allow halting after one round.
-        clamp_adjustment = ((1 - trash_probs.sum(dim=-2)) / (raw_trash_update.sum(dim=-2) + 1e-8)).unsqueeze(-2)
-        requires_adjustment = (raw_trash_update.sum(dim=-2) + trash_probs.sum(dim=-2) > 1 - 0.001).unsqueeze(-2)
-
-        trash_update = torch.where(
-            requires_adjustment,
-            clamp_adjustment * raw_trash_update,
-            raw_trash_update
-        )
-
-        # Calculate the residual_update
-
-        residual_update = torch.where(
-            requires_adjustment,
-            clamp_adjustment * raw_trash_update,
-            0).sum(dim=-2)
-
-        return trash_update, residual_update
-
-#Compound state manipulation.
-
-
-### Dataflow. ####
-
-class Output_Accumulator:
-    """
-    A small class for accumulating output and nonpersistant
-    information.
-    """
-    def restrict(self, map: torch.tensor):
-        """
-        Uses a unhalted map to generate a view of the unhalted parameters.
-        Returns the new accumulator.
-        """
-        map = map.unbind(-1)
-        output = self.output[map]
-        output_probabilities = self.output_probabilities[map]
-        halting_residuals = self.halting_residuals[map]
-        trash_residuals = self.trash_residuals[map]
-        return Output_Accumulator(output,
-                                  output_probabilities,
-                                  halting_residuals,
-                                  trash_residuals)
-    def __init__(self,
-                 output: torch.Tensor,
-                 output_probabilities: torch.Tensor,
-                 halting_residuals: torch.Tensor,
-                 trash_residuals: torch.Tensor,
-                 ):
-
-        self.output = output
-        self.output_probabilities = output_probabilities
-        self.halting_residuals = halting_residuals
-        self.trash_residuals = trash_residuals
-
-class State_Accumulator:
-    """
-    A small location for persistant details,
-    such as state, to gather.
-    """
-    def restrict(self, map):
-        """
-        Uses a unhalted map to generate a view of the unhalted parameters.
-        Returns the new accumulator.
-        """
-        map = map.unbind(-1)
-        state = self.state[map]
-        trash_probabilities = self.trash_probabilities[map]
-        trashcan = self.trashcan[map]
-        return State_Accumulator(state, trash_probabilities, trashcan)
-    def __init__(self,
-                 state: torch.Tensor,
-                 trash_probabilities: torch.Tensor,
-                 trashcan: torch.Tensor
-                 ):
-        self.state = state
-        self.trash_probabilities = trash_probabilities
-        self.trashcan = trashcan
-
-class Communication_Accumulator:
-    """
-    A small class for holding intercommunication
-    information
-    """
-
-
-
-class Adaptive_Stateful_Decoder(Core.KernelSpace):
-
-
-    def generate_unhalted_mesh(self, halting_probs):
-        """
-        Develops a meshgrid index set capable of mapping the unhalted
-        elements.
-        """
-        cumulative_probs = halting_probs.sum(dim=-1)
-        unhalted = cumulative_probs < 1.0
-        unhalted = unhalted.flatten()
-        index = torch.arange(unhalted.shape[-1]).masked_select(unhalted)
-
-
-        mesh = torch.meshgrid(*[torch.arange(elem) for elem in cumulative_probs.shape])
-        mesh = torch.stack(mesh, dim=-1)
-        mesh = mesh.flatten(0, -2)
-
-        output = mesh[index, :]
-        return output
-
-
-
-
-
 
