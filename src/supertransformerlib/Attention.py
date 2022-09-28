@@ -481,7 +481,7 @@ class LCSA(Core.KernelSpace, Core.Utility):
         self.query_projector = Core.Linear(d_model, head_width, parallel_shape, dynamics)
         self.key_projector = Core.Linear(d_model, head_width, parallel_shape, dynamics)
         self.value_projector = Core.Linear(d_model, head_width, parallel_shape, dynamics)
-        self.dehead = Core.Linear([heads, head_width], d_model, parallel_shape, dynamics)
+        self.dehead = Core.Linear([heads, head_width], d_model, parallelization, dynamics)
 
     def forward(self, tensor: torch.Tensor) -> torch.Tensor:
         """
@@ -496,43 +496,42 @@ class LCSA(Core.KernelSpace, Core.Utility):
         # Create local kernel out of input providing interaction between nearby elements
         # Rearrange kernel for independent parallel projection into head space.
 
-        query = tensor.transpose(-1, -2)  # (..., (parallel...), embedding, items)
-        content = tensor.transpose(-1, -2)  # (..., (parallel...), embedding, items)
+        tensor = tensor.unsqueeze(0).transpose(-1, 0).squeeze(-1)
 
         query = Glimpses.dilocal(tensor, 1, 1,
-                                 self.dilations)  # (..., (parallel..), embedding, head, items, local items [1])
+                                 self.dilations)  # (embedding, ..., (parallel..), , head, items, local items [1])
         content = Glimpses.dilocal(tensor, self.kernel_width, 1, self.dilations,
-                                   pad_justification=self.mode)  # (... (paralllel...), embedding, head, items, local_items)
+                                   pad_justification=self.mode)
 
-        query = query.unsqueeze(0).transpose(-2, 0).squeeze(
-            -2)  # (items, ..., (parallel...), embedding, head, local_items)
-        content = content.unsqueeze(0).transpose(-2, 0).squeeze(-2)
+        #Move items to front dims. Move embedding to back dim
+        #perform head projection. Restore
 
-        query = query.unsqueeze(0).transpose(-1, 0).squeeze(
-            -1)  # (local_items, items, ..., (parallel...), embedding, head)
-        content = content.unsqueeze(0).transpose(-1, 0).squeeze(-1)
+        query = query.transpose(-1, 0)
+        content = content.transpose(-1, 0)
+        query = query.unsqueeze(0).transpose(0, -2).squeeze(-2)
+        content = content.unsqueeze(0).transpose(0, -2).squeeze(-2) #  (items,.=local_items, .., (parallel...),  head, embedding)
 
-        query = query.transpose(-1, -2)
-        content = content.transpose(-1, -2)
+        query = self.query_projector(query)
+        key = self.key_projector(content)
+        value = self.value_projector(content)
 
-        # Perform head projections
+        query = query.unsqueeze(-2).transpose(-2, 0).squeeze(0)
+        key = key.unsqueeze(-2).transpose(-2, 0).squeeze(0)
+        value = value.unsqueeze(-2).transpose(-2, 0).squeeze(0)
 
-        query = self.query_projector(query)  # (local_items [1], items, ..., (parallel...), head, head_embedding)
-        key = self.key_projector(content)  # (local_items, items, ..., (parallel...), head, head_embedding)
-        value = self.value_projector(content)  # (local_items, items, ..., (parallel...), head, head_embedding)
+        query = query.unsqueeze(-2).transpose(-2, 0).squeeze(0)
+        key = key.unsqueeze(-2).transpose(-2, 0).squeeze(0)
+        value = value.unsqueeze(-2).transpose(-2, 0).squeeze(0)
 
         # Perform self attention
 
-        # (items, ..., (parallel...), head,  local_items, head_embedding)
-        query = query.unsqueeze(-2).transpose(0, -2).squeeze(0)
-        key = key.unsqueeze(-2).transpose(0, -2).squeeze(0)
-        value = value.unsqueeze(-2).transpose(0, -2).squeeze(0)
 
-        attn = _dot_product_attention(query, key, value)  # (items, ..., (parallel...), head, 1, head_embed)
-        attn = attn.squeeze(-2)  # (items, ..., (parallel...), head, head_embed)
+        attn = _dot_product_attention(query, key, value)
+        attn = attn.squeeze(-2)
 
         # Remove the head then return.
 
+        attn = attn.unsqueeze(0).transpose(-2, 0).squeeze(-2)
         outcome = self.dehead(attn)  # #(items, ..., (parallel...), d_model)
         outcome = outcome.unsqueeze(-2).transpose(-2, 0).squeeze(0)
         return outcome

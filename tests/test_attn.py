@@ -20,14 +20,17 @@ class test_dotproductattention(unittest.TestCase):
         query = torch.randn([3, 5, 10, 20])
         content = torch.randn([3, 5, 30, 20])
         attn = Attention._dot_product_attention(query, content, content)
+
     def test_masked_dotproductattn(self):
         """ tests if a masked case functions correctly """
         query = torch.randn([3, 5, 10, 20])
         content = torch.randn([3, 5, 30, 20])
         mask = torch.randn([10, 30]) > 0.5
         attn = Attention._dot_product_attention(query, content, content, mask)
+
     def test_torchscript_compile(self):
         test = torch.jit.script(Attention._dot_product_attention)
+
     @unittest.skipUnless(torch.cuda.is_available(), "gpu test requires valid gpu install")
     def test_gpu(self):
         """ tests if the gpu runs okay """
@@ -37,6 +40,7 @@ class test_dotproductattention(unittest.TestCase):
         mask = (torch.randn([10, 30]) > 0.5).to(device)
         attn = Attention._dot_product_attention(query, content, content, mask)
 
+
 class test_Feedforward(unittest.TestCase):
     def test_straightforward(self):
         """Test feedforward works without any tricks"""
@@ -45,6 +49,7 @@ class test_Feedforward(unittest.TestCase):
         instance = torch.jit.script(instance)
         self.assertTrue(instance(test_tensor).shape == torch.Size([10, 20, 4, 16]))
         self.assertTrue(torch.any(instance(test_tensor) != test_tensor))
+
     def test_parallel(self):
         """ Test the parallel processing system is engaging"""
         test_tensor = torch.randn([10, 20, 4, 16])
@@ -53,6 +58,7 @@ class test_Feedforward(unittest.TestCase):
         output = instance(test_tensor)
         self.assertTrue(output.shape == torch.Size([10, 20, 4, 16]))
         self.assertTrue(torch.any(output != test_tensor))
+
     def test_dynamics(self):
         """Test the ability of the layer to update the dynamic features"""
         test_tensor = torch.randn([10, 4, 16])
@@ -66,6 +72,7 @@ class test_Feedforward(unittest.TestCase):
         instance.set_config(config2)
         output2 = instance(test_tensor)
         self.assertTrue(torch.any(output1 != output2))
+
     def test_composite(self):
         """Test all features working at once"""
         test_tensor = torch.randn([5, 12, 20, 4, 16])
@@ -75,6 +82,7 @@ class test_Feedforward(unittest.TestCase):
         instance.set_config(config)
         output = instance(test_tensor)
         self.assertTrue(output.shape == torch.Size([5, 12, 20, 4, 16]))
+
 
 class test_MultiHeadedAttention(unittest.TestCase):
     """
@@ -244,13 +252,13 @@ class test_LCSA(unittest.TestCase):
     def test_ensemble(self):
         """ test whether operating in ensemble mode causes any bugs"""
         query = torch.randn([3, 5, 10, 32])
-        layer = Attention.LCSA(32, 4, [1, 2, 5, 10], ensemble=5)
+        layer = Attention.LCSA(32, 4, [1, 2, 5, 10], parallelization=5)
         local_conditioning = layer(query)
         self.assertTrue(shape_equal([3, 5, 10, 32], local_conditioning.shape))
     def test_torchscript_compiles(self):
         """ test whether torchscript is willing to compile an initialized layer"""
         query = torch.randn([3, 5, 10, 32])
-        layer = Attention.LCSA(32, 4, [1, 2, 5, 10], ensemble=5)
+        layer = Attention.LCSA(32, 4, [1, 2, 5, 10], parallelization=5)
         layer = torch.jit.script(layer)
         local_conditioning = layer(query)
         self.assertTrue(shape_equal([3, 5, 10, 32], local_conditioning.shape))
