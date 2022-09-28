@@ -33,7 +33,7 @@ def _dot_product_attention(
     return attn
 
 
-class FeedForward(Core.KernelSpace):
+class FeedForward(nn.Module):
     """
     A feedforward layer for attention purposes.
     As a subclass of KernelSpace, and being built using
@@ -54,29 +54,14 @@ class FeedForward(Core.KernelSpace):
     of shape (..., 10, 15, 20, 128) and process each
     defined dimensions with completely independent parameters
 
-    --- dynamics ---
-
-    This is a feature explained in the Core.Linear class. The long and
-    short of it is, however, that it will allow the ensemble space to function
-    correctly. Long story short, this determines whether or not configuration
-    can be utilized to reconfigure the ensemble and, if so, how many ensembles
-    there are to choose from.
-
     --- config ---
 
     set_config can be used to set all the configurations properly and without issue.
     """
-
-    @torch.jit.export
-    def set_config(self, config: Core.Config):
-        """Set the current config"""
-        self.update_descendents(config)
-
     def __init__(self,
                  d_model: int,
                  d_internal: Optional[int] = None,
                  parallelization: Optional[Union[torch.Tensor, List[int], int]] = None,
-                 dynamics: Optional[int] = None,
                  ):
         """
         :param d_model: The model width
@@ -84,8 +69,6 @@ class FeedForward(Core.KernelSpace):
         :param parallelization: The parallization layers
         :param dynamics: The dynamic width. None means off.
         """
-        if dynamics is None:
-            dynamics = 0
         if d_internal is None:
             d_internal = 2048
 
@@ -94,18 +77,16 @@ class FeedForward(Core.KernelSpace):
         # Setup a few flags
 
         if parallelization is None:
-            self.ff1 = Core.Linear(d_model, d_internal, parallel=parallelization, dynamics=dynamics)
+            self.ff1 = Core.Linear(d_model, d_internal, parallel=parallelization)
             self.activation = nn.ReLU()
-            self.ff2 = Core.Linear(d_internal, d_model, parallel=parallelization, dynamics=dynamics)
+            self.ff2 = Core.Linear(d_internal, d_model, parallel=parallelization)
         else:
             self.ff1 = Core.Linear(d_model, d_internal,
                                    parallel=parallelization,
-                                   dynamics=dynamics
                                    )
             self.activation = nn.ReLU()
             self.ff2 = Core.Linear(d_internal, d_model,
                                    parallel=parallelization,
-                                   dynamics=dynamics
                                    )
 
     def forward(self, tensor: torch.Tensor):
@@ -125,7 +106,7 @@ class FeedForward(Core.KernelSpace):
         return tensor
 
 
-class MultiHeadedAttention(Core.KernelSpace, Core.Utility):
+class MultiHeadedAttention(nn.Module, Core.Utility):
     """
     A Multiheaded Attention layer capable of
     executing parallization alongside ensemble configured
@@ -145,19 +126,9 @@ class MultiHeadedAttention(Core.KernelSpace, Core.Utility):
     of shape (..., 10, 15, 20, 128) and process each
     defined dimensions with completely independent parameters
 
-    --- dynamics ---
-
-    This is a feature explained in the Core.Linear class. The long and
-    short of it is, however, that it will allow the ensemble space to function
-    correctly. Long story short, this determines whether or not configuration
-    can be utilized to reconfigure the ensemble and, if so, how many ensembles
-    there are to choose from.
 
     """
 
-    @torch.jit.export
-    def set_config(self, config: Core.Config):
-        self.update_descendents(config)
 
     def __init__(self,
                  d_query: int,
@@ -165,7 +136,7 @@ class MultiHeadedAttention(Core.KernelSpace, Core.Utility):
                  d_output: int,
                  heads: int,
                  parallelization: Optional[Union[torch.Tensor, List[int], int]] = None,
-                 dynamics: Optional[int] = None):
+                 ):
         """
 
         :param d_query: The dimensions of the query's embeddings
@@ -181,11 +152,10 @@ class MultiHeadedAttention(Core.KernelSpace, Core.Utility):
         assert d_query % heads == 0
         head_width = d_query // heads
 
-        self.query_projector = Core.Linear(d_query, [heads, head_width], parallel=parallelization, dynamics=dynamics)
-        self.key_projector = Core.Linear(d_content, [heads, head_width], parallel=parallelization, dynamics=dynamics)
-        self.value_projector = Core.Linear(d_content, [heads, head_width], parallel=parallelization, dynamics=dynamics)
-        self.collapse_projector = Core.Linear([heads, head_width], d_output, parallel=parallelization,
-                                              dynamics=dynamics)
+        self.query_projector = Core.Linear(d_query, [heads, head_width], parallel=parallelization)
+        self.key_projector = Core.Linear(d_content, [heads, head_width], parallel=parallelization)
+        self.value_projector = Core.Linear(d_content, [heads, head_width], parallel=parallelization)
+        self.collapse_projector = Core.Linear([heads, head_width], d_output, parallel=parallelization)
 
     def forward(self,
                 query: torch.Tensor,
@@ -231,7 +201,7 @@ class MultiHeadedAttention(Core.KernelSpace, Core.Utility):
         return output
 
 
-class PIMU(Core.KernelSpace, Core.Utility):
+class PIMU(nn.Module, Core.Utility):
     """
     Parameter Injection Memory Unit. (PIMU)
 
@@ -258,16 +228,11 @@ class PIMU(Core.KernelSpace, Core.Utility):
 
     """
 
-    @torch.jit.export
-    def set_config(self, config: Core.Config):
-        self.update_descendents(config)
-
     def __init__(self,
                  d_model: int,
                  mem_width: int,
                  heads: int,
                  parallelization: Optional[Union[torch.Tensor, List[int], int]] = None,
-                 dynamics: Optional[int] = None,
                  ):
         """
 
@@ -290,11 +255,6 @@ class PIMU(Core.KernelSpace, Core.Utility):
         if parallelization is not None:
             parallelization = self.standardize_input(parallelization)
             kernel_shape = parallelization.tolist() + kernel_shape
-        if dynamics is not None:
-            using_dynamics = True
-            kernel_shape = [dynamics] + kernel_shape
-        else:
-            using_dynamics = False
 
         key = torch.zeros(kernel_shape)
         value = torch.zeros(kernel_shape)
@@ -302,10 +262,10 @@ class PIMU(Core.KernelSpace, Core.Utility):
         nn.init.kaiming_uniform_(key)
         nn.init.kaiming_uniform_(value)
 
-        self.QueryProj = Core.Linear(d_model, [heads, head_channel_width], parallelization, dynamics)
-        self.Key = Core.Kernel(nn.Parameter(key), using_dynamics)
-        self.Value = Core.Kernel(nn.Parameter(value), using_dynamics)
-        self.DeheadProj = Core.Linear([heads, head_channel_width], d_model, parallelization, dynamics)
+        self.QueryProj = Core.Linear(d_model, [heads, head_channel_width], parallelization)
+        self.Key = nn.Parameter(key)
+        self.Value = nn.Parameter(value)
+        self.DeheadProj = Core.Linear([heads, head_channel_width], d_model, parallelization)
 
     def forward(self, query: torch.Tensor) -> torch.Tensor:
         """
@@ -319,8 +279,8 @@ class PIMU(Core.KernelSpace, Core.Utility):
         query = self.QueryProj(query)
         query = query.unsqueeze(-2).transpose(-2, 0).squeeze(0)
 
-        key = self.Key()
-        value = self.Value()
+        key = self.Key
+        value = self.Value
 
         # Perform dot product attention=
 
@@ -333,7 +293,7 @@ class PIMU(Core.KernelSpace, Core.Utility):
         return output
 
 
-class PISU(Core.KernelSpace, Core.Utility):
+class PISU(nn.Module, Core.Utility):
     """
     Parameter Injected Summary Unit (PISU)
 
@@ -356,7 +316,6 @@ class PISU(Core.KernelSpace, Core.Utility):
                  output_items: int,
                  heads: int,
                  parallelization: Optional[Union[torch.Tensor, List[int], int]] = None,
-                 dynamics: Optional[int] = None,
                  ):
         """
         :param d_model: The embeddings width. Dim -1
@@ -374,22 +333,15 @@ class PISU(Core.KernelSpace, Core.Utility):
         if parallelization is not None:
             parallelization = self.standardize_input(parallelization)
             query_shape = torch.concat([parallelization, query_shape], dim=0)
-        if dynamics is not None:
-            dynamics = torch.tensor([dynamics])
-            query_shape = torch.concat([dynamics, query_shape], dim=0)
-            dynamic = True
-        else:
-            dynamic = False
 
         query = torch.zeros(query_shape.tolist())
         nn.init.kaiming_uniform_(query)
         query = nn.Parameter(query)
-        query = Core.Kernel(query, dynamic)
 
         self.query = query
-        self.key_projector = Core.Linear(d_model, [heads, head_width], parallelization, dynamics)
-        self.value_projector = Core.Linear(d_model, [heads, head_width], parallelization, dynamics)
-        self.dehead = Core.Linear([heads, head_width], d_output, parallelization, dynamics)
+        self.key_projector = Core.Linear(d_model, [heads, head_width], parallelization)
+        self.value_projector = Core.Linear(d_model, [heads, head_width], parallelization)
+        self.dehead = Core.Linear([heads, head_width], d_output, parallelization)
 
     def forward(self, content: torch.Tensor) -> torch.Tensor:
         """
@@ -402,7 +354,7 @@ class PISU(Core.KernelSpace, Core.Utility):
 
         content = content.unsqueeze(0).transpose(0, -2).squeeze(-2)  # (item, ...,  (parallel...), embedding)
 
-        query = self.query()  # ((parallel...),head, output_item, head_embed)
+        query = self.query  # ((parallel...),head, output_item, head_embed)
         key = self.key_projector(content)  # (item, ..., (parallel), head, head_embed)
         value = self.value_projector(content)  # (item, ..., (parallel...), head, head_embed)
 
@@ -421,7 +373,7 @@ class PISU(Core.KernelSpace, Core.Utility):
         return output
 
 
-class LCSA(Core.KernelSpace, Core.Utility):
+class LCSA(nn.Module, Core.Utility):
     """
     Local Context Self Attention (LCSA)
 
@@ -449,7 +401,6 @@ class LCSA(Core.KernelSpace, Core.Utility):
                  kernel_width: int,
                  dilations: List[int],
                  parallelization: Optional[Union[torch.Tensor, List[int], int]] = None,
-                 dynamics: Optional[int] = None,
                  mode: str = "center",
                  ):
         """
@@ -478,10 +429,10 @@ class LCSA(Core.KernelSpace, Core.Utility):
             parallelization = self.standardize_input(parallelization)
             parallel_shape = torch.concat([parallelization, parallel_shape], dim=0)
 
-        self.query_projector = Core.Linear(d_model, head_width, parallel_shape, dynamics)
-        self.key_projector = Core.Linear(d_model, head_width, parallel_shape, dynamics)
-        self.value_projector = Core.Linear(d_model, head_width, parallel_shape, dynamics)
-        self.dehead = Core.Linear([heads, head_width], d_model, parallelization, dynamics)
+        self.query_projector = Core.Linear(d_model, head_width, parallel_shape)
+        self.key_projector = Core.Linear(d_model, head_width, parallel_shape)
+        self.value_projector = Core.Linear(d_model, head_width, parallel_shape)
+        self.dehead = Core.Linear([heads, head_width], d_model, parallelization)
 
     def forward(self, tensor: torch.Tensor) -> torch.Tensor:
         """

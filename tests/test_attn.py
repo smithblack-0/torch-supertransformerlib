@@ -54,34 +54,11 @@ class test_Feedforward(unittest.TestCase):
         """ Test the parallel processing system is engaging"""
         test_tensor = torch.randn([10, 20, 4, 16])
         instance = Attention.FeedForward(16, parallelization=[10, 20])
-        instance =torch.jit.script(instance)
+        instance = torch.jit.script(instance)
         output = instance(test_tensor)
         self.assertTrue(output.shape == torch.Size([10, 20, 4, 16]))
         self.assertTrue(torch.any(output != test_tensor))
 
-    def test_dynamics(self):
-        """Test the ability of the layer to update the dynamic features"""
-        test_tensor = torch.randn([10, 4, 16])
-        config = Core.Config(torch.randn([10, 20]))
-        config2 = Core.Config(torch.randn([10, 20]))
-        instance = Attention.FeedForward(16, dynamics=20)
-
-        instance = torch.jit.script(instance)
-        instance.set_config(config)
-        output1 = instance(test_tensor)
-        instance.set_config(config2)
-        output2 = instance(test_tensor)
-        self.assertTrue(torch.any(output1 != output2))
-
-    def test_composite(self):
-        """Test all features working at once"""
-        test_tensor = torch.randn([5, 12, 20, 4, 16])
-        config = Core.Config(torch.randn([12, 10]))
-        instance = Attention.FeedForward(16, parallelization=[20], dynamics=10)
-        instance = torch.jit.script(instance)
-        instance.set_config(config)
-        output = instance(test_tensor)
-        self.assertTrue(output.shape == torch.Size([5, 12, 20, 4, 16]))
 
 
 class test_MultiHeadedAttention(unittest.TestCase):
@@ -142,16 +119,6 @@ class test_MultiHeadedAttention(unittest.TestCase):
         layer = torch.jit.script(layer)
         attn = layer(query, content, content, mask)
 
-    def test_dynamic_configuration(self):
-        """test that we can dynamically reconfigure the ensembles underlying the layer"""
-        query = torch.randn([3, 5, 10, 64])
-        content = torch.randn([3, 5, 30, 16])
-        mask = torch.randn([10, 30]) > 0.5
-        config = Core.Config(torch.randn([5, 10]))
-
-        layer = Attention.MultiHeadedAttention(64, 16, 32, 4, dynamics=10)
-        layer.set_config(config)
-        attn = layer(query, content, content, mask)
 
     @unittest.skipUnless(torch.cuda.is_available(), "Gpu not availble")
     def test_mha_cuda(self):

@@ -227,7 +227,7 @@ class test_Adaptive_Attention_Integration(unittest.TestCase):
                 with record_function("basic_gpu_profiling"):
                     layer(batch, key)
 
-        print("basic gpu profiling", prof.key_averages().table())
+            print("basic gpu profiling", prof.key_averages().table())
 
 
     def test_cpu_as_torchscript(self):

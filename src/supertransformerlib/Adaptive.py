@@ -9,6 +9,7 @@ import math
 from typing import Optional, Union, List
 
 import torch
+from torch import nn
 from . import Core
 
 
@@ -234,7 +235,7 @@ class AdaptiveTranslator():
         self.Output = Output
 
 
-class AdaptiveAttention(Core.KernelSpace):
+class AdaptiveAttention(nn.Module):
     """
     A very special variety of attention mechanism, this
     works together with halting probabilities to
@@ -281,60 +282,60 @@ class AdaptiveAttention(Core.KernelSpace):
         d_head = d_query // heads
 
         # Attention projectors
-        self.attn_query_projector = Core.Linear(d_query, [heads, d_head], parallelization, dynamics)
-        self.attn_key_projector = Core.Linear(d_key, [heads, d_head], parallelization, dynamics)
+        self.attn_query_projector = Core.Linear(d_query, [heads, d_head], parallelization)
+        self.attn_key_projector = Core.Linear(d_key, [heads, d_head], parallelization)
 
         # Confidence projectors
 
-        self.confidence_query_projector = Core.Linear(d_query, [heads, d_confidence], parallelization, dynamics)
-        self.confidence_key_projector = Core.Linear(d_key, [heads, d_confidence], parallelization, dynamics)
+        self.confidence_query_projector = Core.Linear(d_query, [heads, d_confidence], parallelization)
+        self.confidence_key_projector = Core.Linear(d_key, [heads, d_confidence], parallelization)
 
         # Assembly projectors
 
-        self.assembly_query_projector = Core.Linear(d_query, [heads, d_assembly], parallelization, dynamics)
-        self.assembly_key_projector = Core.Linear(d_key, [heads, d_assembly], parallelization, dynamics)
+        self.assembly_query_projector = Core.Linear(d_query, [heads, d_assembly], parallelization)
+        self.assembly_key_projector = Core.Linear(d_key, [heads, d_assembly], parallelization)
 
         # Value and deheading projectors.
 
-        self.value_projection = Core.Linear(d_value, [heads, d_head], parallelization, dynamics)
-        self.dehead = Core.Linear([heads, d_head], d_value, parallelization, dynamics)
+        self.value_projection = Core.Linear(d_value, [heads, d_head], parallelization)
+        self.dehead = Core.Linear([heads, d_head], d_value, parallelization)
 
     def make_attn_heads(self, query, key, value):
-        query = query.unsqueeze(0).transpose(-2, 0).squeeze(-2)  # (item, (dynamics), (..parallel), embedding)
-        key = key.unsqueeze(0).transpose(-2, 0).squeeze(-2)  # #(item, (dynamics), (..parallel), embedding)
-        value = value.unsqueeze(0).transpose(-2, 0).squeeze(-2)  # (item, (dynamics), (..parallel), embedding)
+        query = query.unsqueeze(0).transpose(-2, 0).squeeze(-2)  # (item,, (..parallel), embedding)
+        key = key.unsqueeze(0).transpose(-2, 0).squeeze(-2)  # #(item, , (..parallel), embedding)
+        value = value.unsqueeze(0).transpose(-2, 0).squeeze(-2)  # (item,..., (..parallel), embedding)
 
         query = self.attn_query_projector(query)
         key = self.attn_key_projector(key)
         value = self.value_projection(value)
 
-        query = query.unsqueeze(-2).transpose(-2, 0).squeeze(0)  # (item, (dynamics), (..parallel), embedding)
-        key = key.unsqueeze(-2).transpose(-2, 0).squeeze(0)  # #(item, (dynamics), (..parallel), embedding)
-        value = value.unsqueeze(-2).transpose(-2, 0).squeeze(0)  # (item, (dynamics), (..parallel), embedding)
+        query = query.unsqueeze(-2).transpose(-2, 0).squeeze(0)  # (item,... (..parallel), embedding)
+        key = key.unsqueeze(-2).transpose(-2, 0).squeeze(0)  # #(item, ..., (..parallel), embedding)
+        value = value.unsqueeze(-2).transpose(-2, 0).squeeze(0)  # (item, ...., (..parallel), embedding)
 
         return query, key, value
 
     def make_confidence_heads(self, query, key):
-        query = query.unsqueeze(0).transpose(-2, 0).squeeze(-2)  # (item, (dynamics), (..parallel), embedding)
-        key = key.unsqueeze(0).transpose(-2, 0).squeeze(-2)  # #(item, (dynamics), (..parallel), embedding)
+        query = query.unsqueeze(0).transpose(-2, 0).squeeze(-2)  # (item, ..., (..parallel), embedding)
+        key = key.unsqueeze(0).transpose(-2, 0).squeeze(-2)  # #(item, ..., (..parallel), embedding)
 
         query = self.confidence_query_projector(query)
         key = self.confidence_key_projector(key)
 
-        query = query.unsqueeze(-2).transpose(-2, 0).squeeze(0)  # (item, (dynamics), (..parallel), embedding)
-        key = key.unsqueeze(-2).transpose(-2, 0).squeeze(0)  # #(item, (dynamics), (..parallel), embedding)
+        query = query.unsqueeze(-2).transpose(-2, 0).squeeze(0)
+        key = key.unsqueeze(-2).transpose(-2, 0).squeeze(0)
 
         return query, key
 
     def make_assembly_heads(self, query, key):
-        query = query.unsqueeze(0).transpose(-2, 0).squeeze(-2)  # (item, (dynamics), (..parallel), embedding)
-        key = key.unsqueeze(0).transpose(-2, 0).squeeze(-2)  # #(item, (dynamics), (..parallel), embedding)
+        query = query.unsqueeze(0).transpose(-2, 0).squeeze(-2)  # (item, ...), (..parallel), embedding)
+        key = key.unsqueeze(0).transpose(-2, 0).squeeze(-2)  # #(item, ..., (..parallel), embedding)
 
         query = self.assembly_query_projector(query)
         key = self.assembly_key_projector(key)
 
-        query = query.unsqueeze(-2).transpose(-2, 0).squeeze(0)  # (item, (dynamics), (..parallel), embedding)
-        key = key.unsqueeze(-2).transpose(-2, 0).squeeze(0)  # #(item, (dynamics), (..parallel), embedding)
+        query = query.unsqueeze(-2).transpose(-2, 0).squeeze(0)
+        key = key.unsqueeze(-2).transpose(-2, 0).squeeze(0)
 
         return query, key
 
