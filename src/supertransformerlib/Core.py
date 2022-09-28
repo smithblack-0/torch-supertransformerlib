@@ -139,7 +139,6 @@ class Linear(Utility, nn.Module):
         if use_bias:
             bias_shape = torch.concat([parallel, bias_shape])
 
-
         super().__init__()
 
         # Generate actual kernels

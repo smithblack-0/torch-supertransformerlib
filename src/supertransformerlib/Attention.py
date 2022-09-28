@@ -129,7 +129,6 @@ class MultiHeadedAttention(nn.Module, Core.Utility):
 
     """
 
-
     def __init__(self,
                  d_query: int,
                  d_content: int,
