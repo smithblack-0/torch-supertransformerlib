@@ -6,11 +6,12 @@ from torch import nn
 from . import Glimpses
 from . import Core
 
+
 def _dot_product_attention(
         query: torch.Tensor,
         key: torch.Tensor,
         value: torch.Tensor,
-        mask: Optional[torch.Tensor] = None,):
+        mask: Optional[torch.Tensor] = None, ):
     """
     Performs dot product attention, as
     shown in "attention is all you need"
@@ -90,7 +91,7 @@ class FeedForward(Core.KernelSpace):
 
         super().__init__()
 
-        #Setup a few flags
+        # Setup a few flags
 
         if parallelization is None:
             self.ff1 = Core.Linear(d_model, d_internal, parallel=parallelization, dynamics=dynamics)
@@ -98,13 +99,13 @@ class FeedForward(Core.KernelSpace):
             self.ff2 = Core.Linear(d_internal, d_model, parallel=parallelization, dynamics=dynamics)
         else:
             self.ff1 = Core.Linear(d_model, d_internal,
-                                    parallel=parallelization,
-                                    dynamics=dynamics
+                                   parallel=parallelization,
+                                   dynamics=dynamics
                                    )
             self.activation = nn.ReLU()
             self.ff2 = Core.Linear(d_internal, d_model,
-                                    parallel=parallelization,
-                                    dynamics=dynamics
+                                   parallel=parallelization,
+                                   dynamics=dynamics
                                    )
 
     def forward(self, tensor: torch.Tensor):
@@ -112,16 +113,17 @@ class FeedForward(Core.KernelSpace):
         :param tensor: A tensor to perform feedforward on
         :return tensor: The result of feedforward processing.
         """
-        #Basically, we move the item dimension to the front
-        #of the tensor, apply the linear layers, and
-        #return the results
+        # Basically, we move the item dimension to the front
+        # of the tensor, apply the linear layers, and
+        # return the results
 
-        tensor = tensor.unsqueeze(0).transpose(0, -2).squeeze(-2) #Transfer the item channel out of the wayh
+        tensor = tensor.unsqueeze(0).transpose(0, -2).squeeze(-2)  # Transfer the item channel out of the wayh
         tensor = self.ff1(tensor)  # (item, ..., (config), (ensemble), internal)
         tensor = self.activation(tensor)
         tensor = self.ff2(tensor)  # (item,..., (config) , (ensemble), embedding)
-        tensor = tensor.unsqueeze(-2).transpose(0, -2).squeeze(0) #Transfer item back into position
+        tensor = tensor.unsqueeze(-2).transpose(0, -2).squeeze(0)  # Transfer item back into position
         return tensor
+
 
 class MultiHeadedAttention(Core.KernelSpace, Core.Utility):
     """
@@ -182,7 +184,8 @@ class MultiHeadedAttention(Core.KernelSpace, Core.Utility):
         self.query_projector = Core.Linear(d_query, [heads, head_width], parallel=parallelization, dynamics=dynamics)
         self.key_projector = Core.Linear(d_content, [heads, head_width], parallel=parallelization, dynamics=dynamics)
         self.value_projector = Core.Linear(d_content, [heads, head_width], parallel=parallelization, dynamics=dynamics)
-        self.collapse_projector = Core.Linear([heads, head_width], d_output, parallel=parallelization, dynamics=dynamics)
+        self.collapse_projector = Core.Linear([heads, head_width], d_output, parallel=parallelization,
+                                              dynamics=dynamics)
 
     def forward(self,
                 query: torch.Tensor,
@@ -201,30 +204,31 @@ class MultiHeadedAttention(Core.KernelSpace, Core.Utility):
 
         # Perform head generation
 
-        query = query.unsqueeze(0).transpose(-2, 0).squeeze(-2) #(item, (dynamics), (..parallel), embedding)
-        key = key.unsqueeze(0).transpose(-2, 0).squeeze(-2) # #(item, (dynamics), (..parallel), embedding)
-        value = value.unsqueeze(0).transpose(-2, 0).squeeze(-2)  #(item, (dynamics), (..parallel), embedding)
+        query = query.unsqueeze(0).transpose(-2, 0).squeeze(-2)  # (item, (dynamics), (..parallel), embedding)
+        key = key.unsqueeze(0).transpose(-2, 0).squeeze(-2)  # (item, (dynamics), (..parallel), embedding)
+        value = value.unsqueeze(0).transpose(-2, 0).squeeze(-2)  # (item, (dynamics), (..parallel), embedding)
 
         headed_query = self.query_projector(query)  # (item ..., (dynamics), (..parallel), head, head_dim)
         headed_key = self.key_projector(key)  # (item ..., (dynamics), (..parallel), head, head_dim)
         headed_value = self.value_projector(value)  # (item ..., (dynamics), (..parallel), head, head_dim)
 
-        headed_query = headed_query.unsqueeze(-2).transpose(0, -2).squeeze(0) #  ..., (dynamics), (..parallel), head, item, head_dim)
-        headed_key = headed_key.unsqueeze(-2).transpose(0, -2).squeeze(0) #  ..., (dynamics), (..parallel), head, item, head_dim)
-        headed_value = headed_value.unsqueeze(-2).transpose(0, -2).squeeze(0) #  ..., (dynamics), (..parallel), head, item, head_dim)
+        headed_query = headed_query.unsqueeze(-2).transpose(0, -2).squeeze(
+            0)  # ..., (dynamics), (..parallel), head, item, head_dim)
+        headed_key = headed_key.unsqueeze(-2).transpose(0, -2).squeeze(
+            0)  # ..., (dynamics), (..parallel), head, item, head_dim)
+        headed_value = headed_value.unsqueeze(-2).transpose(0, -2).squeeze(
+            0)  # ..., (dynamics), (..parallel), head, item, head_dim)
 
-        #Do dot product attention
+        # Do dot product attention
         attn = _dot_product_attention(headed_query, headed_key, headed_value,
                                       mask)  # (...,(dynamics),(..parallel), head, item, head_dim)
 
-        #Reduce heads. Return
-        attn = attn.unsqueeze(0).transpose(-2, 0).squeeze(-2)  #(item,...,(dynamics),(..parallel), head, head_dim)
-        output = self.collapse_projector(attn)  #(item,...,(dynamics),(..parallel), embedding)
-        output = output.unsqueeze(-2).transpose(-2, 0).squeeze(0)#(...,(dynamics),(..parallel), item, embedding)
+        # Reduce heads. Return
+        attn = attn.unsqueeze(0).transpose(-2, 0).squeeze(-2)  # (item,...,(dynamics),(..parallel), head, head_dim)
+        output = self.collapse_projector(attn)  # (item,...,(dynamics),(..parallel), embedding)
+        output = output.unsqueeze(-2).transpose(-2, 0).squeeze(0)  # (...,(dynamics),(..parallel), item, embedding)
 
         return output
-
-
 
 
 class PIMU(Core.KernelSpace, Core.Utility):
@@ -253,10 +257,10 @@ class PIMU(Core.KernelSpace, Core.Utility):
     model down.
 
     """
+
     @torch.jit.export
     def set_config(self, config: Core.Config):
         self.update_descendents(config)
-
 
     def __init__(self,
                  d_model: int,
@@ -278,7 +282,7 @@ class PIMU(Core.KernelSpace, Core.Utility):
         assert d_model % heads == 0
 
         head_channel_width = d_model // heads
-        #Construct kernel shape
+        # Construct kernel shape
 
         kernel_shape: List[int] = []
         kernel_shape = [heads, mem_width, head_channel_width] + kernel_shape
@@ -309,21 +313,21 @@ class PIMU(Core.KernelSpace, Core.Utility):
         :return: The calibrated result of the query.
         """
 
-        #Perform head generation
+        # Perform head generation
 
-        query = query.unsqueeze(0).transpose(-2, 0).squeeze(-2) #(item, (dynamics), (..parallel), embedding)
+        query = query.unsqueeze(0).transpose(-2, 0).squeeze(-2)  # (item, (dynamics), (..parallel), embedding)
         query = self.QueryProj(query)
         query = query.unsqueeze(-2).transpose(-2, 0).squeeze(0)
 
         key = self.Key()
         value = self.Value()
 
-        #Perform dot product attention=
+        # Perform dot product attention=
 
         attn = _dot_product_attention(query, key, value)  #
 
-        #Collapse heads, then return
-        attn = attn.unsqueeze(0).transpose(-2, 0).squeeze(-2)  #(item,...,(dynamics),(..parallel), head, head_dim)
+        # Collapse heads, then return
+        attn = attn.unsqueeze(0).transpose(-2, 0).squeeze(-2)  # (item,...,(dynamics),(..parallel), head, head_dim)
         output = self.DeheadProj(attn)
         output = output.unsqueeze(-2).transpose(-2, 0).squeeze(0)
         return output
@@ -345,7 +349,6 @@ class PISU(Core.KernelSpace, Core.Utility):
     Note that, as with PISU, an aggressive number of heads will
     allow more degrees of freedom, while fewer will allow less.
     """
-
 
     def __init__(self,
                  d_model: int,
@@ -376,7 +379,7 @@ class PISU(Core.KernelSpace, Core.Utility):
             query_shape = torch.concat([dynamics, query_shape], dim=0)
             dynamic = True
         else:
-            dynamic= False
+            dynamic = False
 
         query = torch.zeros(query_shape.tolist())
         nn.init.kaiming_uniform_(query)
@@ -397,20 +400,20 @@ class PISU(Core.KernelSpace, Core.Utility):
 
         # Prepare heads.
 
-        content = content.unsqueeze(0).transpose(0, -2).squeeze(-2) #(item, ...,  (parallel...), embedding)
+        content = content.unsqueeze(0).transpose(0, -2).squeeze(-2)  # (item, ...,  (parallel...), embedding)
 
-        query = self.query() #((parallel...),head, output_item, head_embed)
-        key = self.key_projector(content) #(item, ..., (parallel), head, head_embed)
-        value = self.value_projector(content) #(item, ..., (parallel...), head, head_embed)
+        query = self.query()  # ((parallel...),head, output_item, head_embed)
+        key = self.key_projector(content)  # (item, ..., (parallel), head, head_embed)
+        value = self.value_projector(content)  # (item, ..., (parallel...), head, head_embed)
 
-        key = key.unsqueeze(-2).transpose(0, -2).squeeze(0) #(..., (parallel..), head, item, head_embed)
-        value = value.unsqueeze(-2).transpose(0, -2).squeeze(0) #(..., (parallel..), head, item, head_embed)
+        key = key.unsqueeze(-2).transpose(0, -2).squeeze(0)  # (..., (parallel..), head, item, head_embed)
+        value = value.unsqueeze(-2).transpose(0, -2).squeeze(0)  # (..., (parallel..), head, item, head_embed)
 
-        #Perform dot product attention                                    -3)  # (...., ensemble, head, items, head_embedding)
+        # Perform dot product attention
 
         attn = _dot_product_attention(query, key, value)  # (..., (parallel...), head, output_items, head_embed)
 
-        #Collapse heads and return
+        # Collapse heads and return
 
         attn = attn.unsqueeze(0).transpose(0, -2).squeeze(-2)
         output = self.dehead(attn)
@@ -460,7 +463,7 @@ class LCSA(Core.KernelSpace, Core.Utility):
         :param  mode: controls how the padding is constructed. "forward", "center", "backward" are the
             options. forward only knows about prior words, center about words to the front and back,
             and backwards only future words.
-\        """
+        """
         super().__init__()
         heads = len(dilations)
         assert d_model % heads == 0, "Dilations not compatible with d_model"
@@ -480,7 +483,6 @@ class LCSA(Core.KernelSpace, Core.Utility):
         self.value_projector = Core.Linear(d_model, head_width, parallel_shape, dynamics)
         self.dehead = Core.Linear([heads, head_width], d_model, parallel_shape, dynamics)
 
-
     def forward(self, tensor: torch.Tensor) -> torch.Tensor:
         """
 
@@ -491,48 +493,46 @@ class LCSA(Core.KernelSpace, Core.Utility):
         """
         # Tensor: (..., (parallel...), items, embedding)
 
-        #Create local kernel out of input providing interaction between nearby elements
-        #Rearrange kernel for independent parallel projection into head space.
+        # Create local kernel out of input providing interaction between nearby elements
+        # Rearrange kernel for independent parallel projection into head space.
 
-        query = tensor.transpose(-1, -2) #(..., (parallel...), embedding, items)
-        content = tensor.transpose(-1, -2) #(..., (parallel...), embedding, items)
+        query = tensor.transpose(-1, -2)  # (..., (parallel...), embedding, items)
+        content = tensor.transpose(-1, -2)  # (..., (parallel...), embedding, items)
 
-        query = Glimpses.dilocal(tensor, 1, 1, self.dilations)  # (..., (parallel..), embedding, head, items, local items [1])
+        query = Glimpses.dilocal(tensor, 1, 1,
+                                 self.dilations)  # (..., (parallel..), embedding, head, items, local items [1])
         content = Glimpses.dilocal(tensor, self.kernel_width, 1, self.dilations,
                                    pad_justification=self.mode)  # (... (paralllel...), embedding, head, items, local_items)
 
-
-        query = query.unsqueeze(0).transpose(-2, 0).squeeze(-2) #(items, ..., (parallel...), embedding, head, local_items)
+        query = query.unsqueeze(0).transpose(-2, 0).squeeze(
+            -2)  # (items, ..., (parallel...), embedding, head, local_items)
         content = content.unsqueeze(0).transpose(-2, 0).squeeze(-2)
 
-        query = query.unsqueeze(0).transpose(-1, 0).squeeze(-1) #(local_items, items, ..., (parallel...), embedding, head)
+        query = query.unsqueeze(0).transpose(-1, 0).squeeze(
+            -1)  # (local_items, items, ..., (parallel...), embedding, head)
         content = content.unsqueeze(0).transpose(-1, 0).squeeze(-1)
 
         query = query.transpose(-1, -2)
         content = content.transpose(-1, -2)
 
+        # Perform head projections
 
-        #Perform head projections
+        query = self.query_projector(query)  # (local_items [1], items, ..., (parallel...), head, head_embedding)
+        key = self.key_projector(content)  # (local_items, items, ..., (parallel...), head, head_embedding)
+        value = self.value_projector(content)  # (local_items, items, ..., (parallel...), head, head_embedding)
 
-        query = self.query_projector(query) #(local_items [1], items, ..., (parallel...), head, head_embedding)
-        key = self.key_projector(content)  #(local_items, items, ..., (parallel...), head, head_embedding)
-        value = self.value_projector(content)   #(local_items, items, ..., (parallel...), head, head_embedding)
+        # Perform self attention
 
-        #Perform self attention
-
-            # (items, ..., (parallel...), head,  local_items, head_embedding)
+        # (items, ..., (parallel...), head,  local_items, head_embedding)
         query = query.unsqueeze(-2).transpose(0, -2).squeeze(0)
         key = key.unsqueeze(-2).transpose(0, -2).squeeze(0)
         value = value.unsqueeze(-2).transpose(0, -2).squeeze(0)
 
-        attn = _dot_product_attention(query, key, value) #(items, ..., (parallel...), head, 1, head_embed)
-        attn = attn.squeeze(-2) #(items, ..., (parallel...), head, head_embed)
+        attn = _dot_product_attention(query, key, value)  # (items, ..., (parallel...), head, 1, head_embed)
+        attn = attn.squeeze(-2)  # (items, ..., (parallel...), head, head_embed)
 
-        #Remove the head then return.
+        # Remove the head then return.
 
         outcome = self.dehead(attn)  # #(items, ..., (parallel...), d_model)
         outcome = outcome.unsqueeze(-2).transpose(-2, 0).squeeze(0)
         return outcome
-        
-
-
