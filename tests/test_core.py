@@ -133,6 +133,7 @@ class testLinear(unittest.TestCase):
         # Perform test
         scripted = torch.jit.script(test_script)
         scripted(test_tensor)
+
     def test_dynamics(self):
         """Test whether or not dynamic assignment works."""
         test_tensor = torch.randn([30, 20, 20])
