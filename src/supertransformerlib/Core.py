@@ -15,7 +15,7 @@ from . import Glimpses
 
 
 @torch.jit.script
-class Config():
+class Config:
     """
     A class for representating a configuration
     an ensemble may be placed into.
