@@ -9,6 +9,6 @@ __version__ = "2.0r0"
 
 from . import Glimpses # noqa
 from . import Attention # noqa
-from . import Adaptive
+from . import Adaptive #noqa
 from . import Core # noqa
 from . import Loss # noqa
