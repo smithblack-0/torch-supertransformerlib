@@ -5,7 +5,7 @@ extended linear process.
 
 """
 import math
-from typing import Union, List, Optional, Dict, overload
+from typing import Union, List, Optional
 
 import torch
 import torch.nn

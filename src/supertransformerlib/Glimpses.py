@@ -80,7 +80,7 @@ def view(tensor,
     return output
 
 
-def _strided_reshape(tensor: torch.Tensor, input_shape: torch.Tensor, output_shape: torch.Tensor)->torch.Tensor:
+def _strided_reshape(tensor: torch.Tensor, input_shape: torch.Tensor, output_shape: torch.Tensor) -> torch.Tensor:
     """
     A helper function which performs strided reshape when requested
     """
@@ -93,15 +93,6 @@ def _strided_reshape(tensor: torch.Tensor, input_shape: torch.Tensor, output_sha
 
     output: torch.Tensor = tensor.reshape(final_shape)
     return output
-
-def _sparse_reshape(tensor: torch.Tensor,
-                    input_shape: torch.Tensor,
-                    output_shape: torch.Tensor,
-                    resize_sparse_dims: bool = True)->torch.Tensor:
-    """
-    A small function to perform a sparse reshape. Element number must remain the same.
-    """
-    pass
 
 
 def reshape(tensor,
