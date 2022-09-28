@@ -160,7 +160,7 @@ class test_Adaptive_Attention_Integration(unittest.TestCase):
     Tests that when put together, the mapping features and layers
     can perform adaptive attention over something like a batch
     """
-
+    profile_it = False
     def get_test_mechanism(self)->torch.nn.Module:
         class test_mechanism(torch.nn.Module):
             def __init__(self, q_query, q_key, q_value, q_confidence, q_assembly, heads):
@@ -204,10 +204,11 @@ class test_Adaptive_Attention_Integration(unittest.TestCase):
         layer(batch, key)
         layer(batch, key)
 
-        with profile(activities=[ProfilerActivity.CPU], record_shapes=True) as prof:
-            with record_function("basic_cpu_profiling"):
-                buffer = layer(batch, key)
-        print("basic cpu profiling", prof.key_averages().table())
+        if self.profile_it:
+            with profile(activities=[ProfilerActivity.CPU], record_shapes=True) as prof:
+                with record_function("basic_cpu_profiling"):
+                    buffer = layer(batch, key)
+            print("basic cpu profiling", prof.key_averages().table())
 
 
     @unittest.skipUnless(torch.cuda.is_available(), "gpu test requires valid gpu install")
@@ -217,9 +218,14 @@ class test_Adaptive_Attention_Integration(unittest.TestCase):
         batch, key = self.get_test_tensors()
         batch = batch.to("cuda")
         key = key.to("cuda")
-        with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA], record_shapes=True) as prof:
-            with record_function("basic_gpu_profiling"):
-                layer(batch, key)
+
+        layer(batch, key)
+        layer(batch, key)
+
+        if self.profile_it:
+            with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA], record_shapes=True) as prof:
+                with record_function("basic_gpu_profiling"):
+                    layer(batch, key)
 
         print("basic gpu profiling", prof.key_averages().table())
 
@@ -234,12 +240,13 @@ class test_Adaptive_Attention_Integration(unittest.TestCase):
         layer(batch, key)
         layer(batch, key)
 
-        #Torchscript
-        with profile(activities=[], record_shapes=True) as prof:
-            with record_function("cpu_torchscript"):
-                buffer = layer(batch, key)
+        if self.profile_it:
+            #Torchscript
+            with profile(activities=[], record_shapes=True) as prof:
+                with record_function("cpu_torchscript"):
+                    buffer = layer(batch, key)
 
-        print("torchscript cpu profiling", prof.key_averages().table())
+            print("torchscript cpu profiling", prof.key_averages().table())
 
     @unittest.skipUnless(torch.cuda.is_available(), "gpu test requires valid gpu install")
     def test_gpu_as_torchscript(self):
@@ -248,7 +255,12 @@ class test_Adaptive_Attention_Integration(unittest.TestCase):
         batch, key = self.get_test_tensors()
         batch = batch.to("cuda")
         key = key.to("cuda")
-        with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA], record_shapes=True) as prof:
-            with record_function("torchscript_gpu_profiling"):
-                buffer = layer(batch, key)
-        print("basic cpu profiling", prof.key_averages().table())
+
+        layer(batch, key)
+        layer(batch, key)
+
+        if self.profile_it:
+            with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA], record_shapes=True) as prof:
+                with record_function("torchscript_gpu_profiling"):
+                    buffer = layer(batch, key)
+            print("basic cpu profiling", prof.key_averages().table())
