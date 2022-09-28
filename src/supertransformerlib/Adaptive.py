@@ -197,7 +197,7 @@ class Adaptive_Translator():
         """Check if everything is fully halted."""
         return torch.all(self.Halting_Probabilities >= 1 - 0.001)
 
-    def get_map(self) -> Adaptive_Map:
+    def get_map(self) -> AdaptiveMap:
         """Gets the tensor mapping associated with the current halting probabilities"""
         return self._Map
 
@@ -231,7 +231,7 @@ class Adaptive_Translator():
         self.Halting_Probabilities = self._Map.update(self.Halting_Probabilities, update.Halting_Probabilities)
         self.Residuals = self._Map.update(self.Residuals, update.Residuals)
         self.Output = self._Map.update(self.Output, update.Output)
-        self._Map = Adaptive_Map(self.Halting_Probabilities)
+        self._Map = AdaptiveMap(self.Halting_Probabilities)
 
     def _manual_update(self,
                        Halting_Probabilities: Optional[torch.Tensor] = None,
@@ -254,7 +254,7 @@ class Adaptive_Translator():
                  Residuals: torch.Tensor,
                  Output: torch.Tensor,
                  ):
-        self._Map = Adaptive_Map(Halting_Probabilities)
+        self._Map = AdaptiveMap(Halting_Probabilities)
         self.Halting_Probabilities = Halting_Probabilities
         self.Residuals = Residuals
         self.Output = Output

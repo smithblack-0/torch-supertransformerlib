@@ -12,7 +12,7 @@ class test_AdaptiveMap(unittest.TestCase):
     def test_constructor(self):
         """Test the constructor makes the mesh and mapping correctly."""
         halted_probabilities = torch.tensor([[0.0, 0.0],[0.1, 1.0], [1.0, 1.0]])
-        map = Adaptive.Adaptive_Map(halted_probabilities)
+        map = Adaptive.AdaptiveMap(halted_probabilities)
 
         expected_mapping = torch.tensor([0, 1])
         self.assertTrue(torch.all(map.index == expected_mapping))
@@ -26,7 +26,7 @@ class test_AdaptiveMap(unittest.TestCase):
         halted_probabilities = torch.tensor([[0.0, 0.0],[0.1, 1.0], [1.0, 1.0]])
         expected_restricted = torch.tensor([[0.0, 0.0],[0.1, 1.0]])
         expected_updated = torch.tensor([[0.0, 0.0], [0.0, 1.0], [1.0, 1.0]])
-        map = Adaptive.Adaptive_Map(halted_probabilities)
+        map = Adaptive.AdaptiveMap(halted_probabilities)
 
         restricted = map.transform(halted_probabilities)
         self.assertTrue(torch.all(expected_restricted == restricted))
@@ -38,7 +38,7 @@ class test_AdaptiveMap(unittest.TestCase):
         """Test that tensor map still performs when extra dimensions are involved beyond the query dim"""
         halting_probabilities = torch.clamp(2*torch.rand([10, 20, 30]), 0, 1)
         tensor = torch.randn([10, 20, 30, 5, 6])
-        map = Adaptive.Adaptive_Map(halting_probabilities)
+        map = Adaptive.AdaptiveMap(halting_probabilities)
 
 
         restricted = map.transform(tensor)
@@ -64,10 +64,10 @@ class test_AdaptiveMap(unittest.TestCase):
     def test_torchscript_compiles(self):
         """Test if torchscript is willing to do a proper update"""
         halting_probabilities = torch.clamp(2*torch.rand([10, 20, 30]), 0, 1)
-        map_func = torch.jit.script(Adaptive.Adaptive_Map)
+        map_func = torch.jit.script(Adaptive.AdaptiveMap)
         map = map_func(halting_probabilities)
         restricted = map.transform(halting_probabilities)
-        updated = map.update_buffer(halting_probabilities, restricted)
+        updated = map.update(halting_probabilities, restricted)
     def test_torchscript_metacompiles(self):
         """Test if torchscript will do updates when indirection occurs. """
         #This test exists because torchscript was refusing to do vector
@@ -76,7 +76,7 @@ class test_AdaptiveMap(unittest.TestCase):
 
         @torch.jit.script
         def makemap(halting_probs):
-            return Adaptive.Adaptive_Map(halting_probs)
+            return Adaptive.AdaptiveMap(halting_probs)
         map = makemap(torch.rand([10, 10, 10]))
         tensor = torch.randn([10, 10, 10, 30])
         restriction = map.transform(tensor)
@@ -98,7 +98,7 @@ class test_Adaptive_Attention(unittest.TestCase):
         layer = Adaptive.Adaptive_Attention(32, 32, 32, 5, 6, 7)
 
         buffer = Adaptive.Adaptive_Translator.start_buffer(query)
-        accumulator = buffer.get_subaccumulator()
+        accumulator = buffer.get_subbatch()
 
         #Call
         new_accumulator = layer(accumulator, query, key, value)
@@ -111,7 +111,7 @@ class test_Adaptive_Attention(unittest.TestCase):
         layer = Adaptive.Adaptive_Attention(32, 48, 64, 5, 6, 7)
 
         buffer = Adaptive.Adaptive_Translator.start_buffer(query, 64)
-        accumulator = buffer.get_subaccumulator()
+        accumulator = buffer.get_subbatch()
 
         new_accumulator = layer(accumulator, query, key, value)
         self.assertTrue(torch.any(new_accumulator.Output != accumulator.Output))
@@ -124,8 +124,8 @@ class test_Adaptive_Attention(unittest.TestCase):
         layer = Adaptive.Adaptive_Attention(32, 48, 64, 5, 6, 7)
 
         buffer = Adaptive.Adaptive_Translator.start_buffer(query, 64)
-        buffer = buffer.update_buffer(torch.ones([1, 5]))
-        accumulator = buffer.get_subaccumulator()
+        buffer = buffer._manual_update(torch.ones([1, 5]))
+        accumulator = buffer.get_subbatch()
 
         new_accumulator = layer(accumulator, query, key, value)
         self.assertTrue(torch.all(new_accumulator.Output == accumulator.Output))
@@ -139,8 +139,8 @@ class test_Adaptive_Attention(unittest.TestCase):
         layer = Adaptive.Adaptive_Attention(32, 48, 64, 5, 6, 7)
 
         buffer = Adaptive.Adaptive_Translator.start_buffer(query, 64)
-        buffer = buffer.update_buffer(0.9 * torch.ones([10, 5]))
-        accumulator = buffer.get_subaccumulator()
+        buffer = buffer._manual_update(0.9 * torch.ones([10, 5]))
+        accumulator = buffer.get_subbatch()
 
         new_accumulator = layer(accumulator, query, key, value)
 
@@ -199,6 +199,11 @@ class test_Adaptive_Attention_Integration(unittest.TestCase):
 
         layer = self.get_test_mechanism()
         batch, key = self.get_test_tensors()
+
+        # Ensures torch has decided to optimize the call
+        layer(batch, key)
+        layer(batch, key)
+
         with profile(activities=[ProfilerActivity.CPU], record_shapes=True) as prof:
             with record_function("basic_cpu_profiling"):
                 buffer = layer(batch, key)
@@ -225,6 +230,11 @@ class test_Adaptive_Attention_Integration(unittest.TestCase):
         layer = torch.jit.script(layer)
         batch, key = self.get_test_tensors()
 
+        #Ensures torchscript has decided to optimize the call
+        layer(batch, key)
+        layer(batch, key)
+
+        #Torchscript
         with profile(activities=[], record_shapes=True) as prof:
             with record_function("cpu_torchscript"):
                 buffer = layer(batch, key)
