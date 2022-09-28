@@ -28,7 +28,7 @@ class test_AdaptiveMap(unittest.TestCase):
         expected_updated = torch.tensor([[0.0, 0.0], [0.0, 1.0], [1.0, 1.0]])
         map = Adaptive.Adaptive_Map(halted_probabilities)
 
-        restricted = map.restrict(halted_probabilities)
+        restricted = map.transform(halted_probabilities)
         self.assertTrue(torch.all(expected_restricted == restricted))
 
         update = torch.zeros_like(restricted)
@@ -41,7 +41,7 @@ class test_AdaptiveMap(unittest.TestCase):
         map = Adaptive.Adaptive_Map(halting_probabilities)
 
 
-        restricted = map.restrict(tensor)
+        restricted = map.transform(tensor)
         restricted = -torch.ones_like(restricted)
         update = map.update(tensor, restricted)
 
@@ -66,8 +66,8 @@ class test_AdaptiveMap(unittest.TestCase):
         halting_probabilities = torch.clamp(2*torch.rand([10, 20, 30]), 0, 1)
         map_func = torch.jit.script(Adaptive.Adaptive_Map)
         map = map_func(halting_probabilities)
-        restricted = map.restrict(halting_probabilities)
-        updated = map.update(halting_probabilities, restricted)
+        restricted = map.transform(halting_probabilities)
+        updated = map.update_buffer(halting_probabilities, restricted)
     def test_torchscript_metacompiles(self):
         """Test if torchscript will do updates when indirection occurs. """
         #This test exists because torchscript was refusing to do vector
@@ -79,7 +79,7 @@ class test_AdaptiveMap(unittest.TestCase):
             return Adaptive.Adaptive_Map(halting_probs)
         map = makemap(torch.rand([10, 10, 10]))
         tensor = torch.randn([10, 10, 10, 30])
-        restriction = map.restrict(tensor)
+        restriction = map.transform(tensor)
         update = map.update(tensor, restriction)
 
 
@@ -124,7 +124,7 @@ class test_Adaptive_Attention(unittest.TestCase):
         layer = Adaptive.Adaptive_Attention(32, 48, 64, 5, 6, 7)
 
         buffer = Adaptive.Adaptive_Translator.start_buffer(query, 64)
-        buffer = buffer.update(torch.ones([1, 5]))
+        buffer = buffer.update_buffer(torch.ones([1, 5]))
         accumulator = buffer.get_subaccumulator()
 
         new_accumulator = layer(accumulator, query, key, value)
@@ -139,7 +139,7 @@ class test_Adaptive_Attention(unittest.TestCase):
         layer = Adaptive.Adaptive_Attention(32, 48, 64, 5, 6, 7)
 
         buffer = Adaptive.Adaptive_Translator.start_buffer(query, 64)
-        buffer = buffer.update(0.9*torch.ones([10, 5]))
+        buffer = buffer.update_buffer(0.9 * torch.ones([10, 5]))
         accumulator = buffer.get_subaccumulator()
 
         new_accumulator = layer(accumulator, query, key, value)
@@ -165,17 +165,20 @@ class test_Adaptive_Attention_Integration(unittest.TestCase):
         class test_mechanism(torch.nn.Module):
             def __init__(self, q_query, q_key, q_value, q_confidence, q_assembly, heads):
                 super().__init__()
-                self.attn = Adaptive.Adaptive_Attention(32, 64, 64, 4, 4, 4)
+                self.attn = Adaptive.Adaptive_Attention(q_query, q_key, q_value, q_confidence, q_assembly, heads)
 
             def forward(self, batch_mockup, key_mockup):
-                buffer = Adaptive.Adaptive_Translator.start_buffer(batch_mockup, 64)
+                buffer: Adaptive.Adaptive_Translator = Adaptive.Adaptive_Translator.start_buffer(batch_mockup, 64)
                 while not buffer.is_done():
-                    subbatch = buffer.get_subaccumulator()
-                    subquery = buffer.g(batch_mockup)
-                    subkey = buffer.get_unhalted_from_tensor(batch_mockup)
+
+                    subbatch = buffer.get_subbatch()
+                    mapper = buffer.get_map()
+
+                    subquery = mapper.transform(batch_mockup)
+                    subkey = mapper.transform(key_mockup)
 
                     update = self.attn(subbatch, subquery, subkey, subkey)
-                    buffer.set_from_subaccumulator(update)
+                    buffer.update_buffer(update)
                 return buffer
 
         layer_mockup = test_mechanism(32, 64, 64, 4, 4, 4)
@@ -231,10 +234,11 @@ class test_Adaptive_Attention_Integration(unittest.TestCase):
     @unittest.skipUnless(torch.cuda.is_available(), "gpu test requires valid gpu install")
     def test_gpu_as_torchscript(self):
 
-        layer = self.get_test_mechanism()
-        layer = torch.jit.script(layer)
+        layer = self.get_test_mechanism().to("cuda")
         batch, key = self.get_test_tensors()
-        with profile(activities=[ProfilerActivity.CPU], record_shapes=True) as prof:
-            with record_function("basic_cpu_profiling"):
+        batch = batch.to("cuda")
+        key = key.to("cuda")
+        with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA], record_shapes=True) as prof:
+            with record_function("torchscript_gpu_profiling"):
                 buffer = layer(batch, key)
         print("basic cpu profiling", prof.key_averages().table())

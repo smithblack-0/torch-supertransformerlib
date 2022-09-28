@@ -10,7 +10,7 @@ def _dot_product_attention(
         query: torch.Tensor,
         key: torch.Tensor,
         value: torch.Tensor,
-        mask: Optional[torch.Tensor] = None):
+        mask: Optional[torch.Tensor] = None,):
     """
     Performs dot product attention, as
     shown in "attention is all you need"

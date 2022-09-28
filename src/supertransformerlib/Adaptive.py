@@ -46,14 +46,13 @@ class Adaptive_Map():
     It bases all calculations on the halting probabilities
     tensor it is fed - probability 1.0 means halted.
 
-    Two functions exist. These are restrict, and update.
-    Restrict ensures that as efficient a batch as possible
-    is fed to
+    Two functions exist. A forward transformation restricting
+    the tensor to the unhalted domain, and an update function.
 
     '"""
-    def restrict(self, tensor: torch.Tensor) -> torch.Tensor:
+    def transform(self, tensor: torch.Tensor) -> torch.Tensor:
         """
-        When restricting, it restricts the output to
+        When transforming, it restricts the output to
         a flat batch of only unhalted channels.
 
         :param tensor: Tensor to map into restricted space. Should be shape (...batch, query, Qptional[...more])
@@ -189,7 +188,12 @@ class Adaptive_Translator():
     channels instead.
     """
     def is_done(self):
+        """Check if everything is fully halted."""
         return torch.all(self.Halting_Probabilities >= 1 - 0.001)
+
+    def get_map(self)->Adaptive_Map:
+        """Gets the tensor mapping associated with the current halting probabilities"""
+        return self._Map
 
     @staticmethod
     def start_buffer(word_embeddings: torch.Tensor, embedding_length: Optional[int] = None)->"Adaptive_Translator":
@@ -209,42 +213,21 @@ class Adaptive_Translator():
         output = torch.zeros(shape, device=word_embeddings.device)
         return Adaptive_Translator(halting_probabilities, residuals, output)
 
-    def get_from_tensor(self, tensor: torch.Tensor)->torch.Tensor:
-        """
-        Restricts a tensor of batch-query shape to be of exactly
-        the same shape as the unhalted batches. Unused elements are
-        just excluded.
-
-        :param tensor: A tensor in [...batch, query, ..other] shape
-        :return: A reshaped tensor, in [flatbatch, query, ...other] shape
-        """
-        return self.Map.restrict(tensor)
-    def set_to_tensor(self, tensor: torch.Tensor, update: torch.Tensor)->torch.Tensor:
-        """
-        Accepts the original tensor and a unhalted-restricted tensor,
-        then updates the original with the update respecting masks.
-
-        :param tensor: An original tensor
-        :param update: An update developed from the original tensor
-        :return: An updated tensor
-        """
-        return self.Map.update(tensor, update)
-
-    def get_subaccumulator(self)->Subaccumulator:
+    def get_subbatch(self)->Subaccumulator:
         """Gets a subaccumulator which contains the unhalted entries."""
-        halting_probs = self.Map.restrict(self.Halting_Probabilities)
-        residuals = self.Map.restrict(self.Residuals)
-        output = self.Map.restrict(self.Output)
+        halting_probs = self._Map.transform(self.Halting_Probabilities)
+        residuals = self._Map.transform(self.Residuals)
+        output = self._Map.transform(self.Output)
         return Subaccumulator(halting_probs, residuals, output)
 
-    def set_from_subaccumulator(self, update: Subaccumulator):
+    def update_buffer(self, update: Subaccumulator):
         """Updates the accumulator with the results from a particular subbatch"""
-        self.Halting_Probabilities = self.Map.update(self.Halting_Probabilities, update.Halting_Probabilities)
-        self.Residuals = self.Map.update(self.Residuals, update.Residuals)
-        self.Output = self.Map.update(self.Output, update.Output)
-        self.Map = Adaptive_Map(self.Halting_Probabilities)
+        self.Halting_Probabilities = self._Map.update(self.Halting_Probabilities, update.Halting_Probabilities)
+        self.Residuals = self._Map.update(self.Residuals, update.Residuals)
+        self.Output = self._Map.update(self.Output, update.Output)
+        self._Map = Adaptive_Map(self.Halting_Probabilities)
 
-    def update(self,
+    def _manual_update(self,
                Halting_Probabilities: Optional[torch.Tensor] = None,
                Residuals: Optional[torch.Tensor] = None,
                Output: Optional[torch.Tensor] = None,
@@ -265,7 +248,7 @@ class Adaptive_Translator():
                 Residuals: torch.Tensor,
                 Output: torch.Tensor,
                  ):
-        self.Map = Adaptive_Map(Halting_Probabilities)
+        self._Map = Adaptive_Map(Halting_Probabilities)
         self.Halting_Probabilities = Halting_Probabilities
         self.Residuals = Residuals
         self.Output = Output
