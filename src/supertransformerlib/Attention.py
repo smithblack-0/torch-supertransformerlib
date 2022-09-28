@@ -509,7 +509,7 @@ class LCSA(Core.KernelSpace, Core.Utility):
         query = query.transpose(-1, 0)
         content = content.transpose(-1, 0)
         query = query.unsqueeze(0).transpose(0, -2).squeeze(-2)
-        content = content.unsqueeze(0).transpose(0, -2).squeeze(-2) #  (items,.=local_items, .., (parallel...),  head, embedding)
+        content = content.unsqueeze(0).transpose(0, -2).squeeze(-2) # (items,.=local_items, .., (parallel...),  head, embedding)
 
         query = self.query_projector(query)
         key = self.key_projector(content)
@@ -524,7 +524,6 @@ class LCSA(Core.KernelSpace, Core.Utility):
         value = value.unsqueeze(-2).transpose(-2, 0).squeeze(0)
 
         # Perform self attention
-
 
         attn = _dot_product_attention(query, key, value)
         attn = attn.squeeze(-2)
