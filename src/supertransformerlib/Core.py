@@ -5,7 +5,7 @@ extended linear process.
 
 """
 import math
-from typing import Union, List, Optional
+from typing import Union, List, Optional, Tuple
 
 import torch
 import torch.nn
@@ -28,6 +28,42 @@ class Utility:
             input = [input]
         output = torch.tensor(input, dtype=torch.int64)
         return output
+
+@torch.jit.script
+class Linear_Forward:
+    """
+    The linear forward mechanism.
+
+    Accepts the input map, the output map,
+    kernel, and bias. Produced by kernel
+    loader.
+    """
+
+    def __init__(self,
+                 input_map: Tuple[torch.Tensor, torch.Tensor],
+                 output_map: Tuple[torch.Tensor, torch.Tensor],
+                 kernel: torch.Tensor,
+                 bias: torch.Tensor,
+                 ):
+        self.input_map = input_map
+        self.output_map = output_map
+        self.kernel = kernel
+        self.bias = bias
+
+    def __call__(self,
+                tensor: torch.Tensor,
+                ):
+        input_shape, row_length = self.input_map
+        column_length, output_shape = self.output_map
+
+        flattened_input = Glimpses.reshape(tensor, input_shape, row_length)
+        flattened_input = flattened_input.unsqueeze(-1)
+
+        flattened_output = torch.matmul(self.kernel, flattened_input).squeeze(-1)
+        flattened_output = flattened_output + self.bias
+
+        restored_output = Glimpses.reshape(flattened_output, column_length, output_shape)
+        return restored_output
 
 
 class Linear(Utility, nn.Module):
@@ -84,17 +120,10 @@ class Linear(Utility, nn.Module):
     Additionally, we could go deeper. Defining Linear(5, 7, [10, 23]) would make a
     kernel capable of addressing the entire tensor at once.
 
-    This has its greatest utility when designing independent ensembles. However,
-    exchange of information has it's purpose. Which brings us to...
 
-    ---- Combination ----
-
-    when both parallization and dynamic configuration is present, the order of resolution across dimensions,
-    from right to left, is first the autoshaping specifications, then the parallelization, and finally the
-    dynamic specifications.
 
     """
-
+    ForwardType = Linear_Forward
     def __init__(self,
                  input_shape: Union[torch.Tensor, List[int], int],
                  output_shape: Union[torch.Tensor, List[int], int],
@@ -121,8 +150,8 @@ class Linear(Utility, nn.Module):
 
         # Begin developing kernel shapes and conversions
 
-        matrix_rows = input_shape.prod().unsqueeze(-1)
-        matrix_columns = output_shape.prod().unsqueeze(-1)
+        matrix_rows: torch.Tensor = input_shape.prod().unsqueeze(-1)
+        matrix_columns: torch.Tensor = output_shape.prod().unsqueeze(-1)
         matrix_shape = torch.concat([matrix_columns, matrix_rows], dim=0)
 
         if use_bias:
@@ -162,18 +191,32 @@ class Linear(Utility, nn.Module):
         if use_bias:
             self.bias_kernel = bias_kernel
 
-    def forward(self, tensor: torch.Tensor):
+    def load_kernel(self)->Linear_Forward:
+        """
+        Returns (basically) a torchscript passible linear forward function
+        call. Type can be gotten from ForwardType variable on main class.
 
-        input_shape, row_length = self.input_map_reference
-        column_length, output_shape = self.output_map_reference
-
-        flattened_input = Glimpses.reshape(tensor, input_shape, row_length)
-        flattened_input = flattened_input.unsqueeze(-1)
-
+        """
         if self.use_bias:
-            flattened_output = torch.matmul(self.matrix_kernel, flattened_input).squeeze(-1)
-            flattened_output = flattened_output + self.bias_kernel
+            return Linear_Forward(self.input_map_reference,
+                                  self.output_map_reference,
+                                  self.matrix_kernel,
+                                  self.bias_kernel)
         else:
-            flattened_output = torch.matmul(self.matrix_kernel, flattened_input)
-        restored_output = Glimpses.reshape(flattened_output, column_length, output_shape)
-        return restored_output
+            return Linear_Forward(self.input_map_reference,
+                                  self.output_map_reference,
+                                  self.matrix_kernel,
+                                  torch.zeros([1], device=self.matrix_kernel.device))
+
+    def forward(self, tensor: torch.Tensor):
+        """
+        Execute the forward mechanism.
+        :param tensor:
+        :return:
+        """
+        # Torchscript does not like to pass around layers, but I do.
+        # To get around this, the majority of the feedforward mechanism is
+        # located in the Linear_Forward class.
+
+        forward_call = self.load_kernel()
+        return forward_call(tensor)

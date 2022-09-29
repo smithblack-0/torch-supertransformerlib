@@ -33,6 +33,39 @@ def _dot_product_attention(
     return attn
 
 
+
+@torch.jit.script
+class _FeedForward_Forward:
+    """
+    A feedforward mechanism capable of executing
+    a feedforward operation after the kernels have been
+    loaded. Works with main layer FeedForward
+    """
+    def __init__(self,
+                 ff1: Core.Linear.ForwardType,
+                 ff2: Core.Linear.ForwardType,
+                 ):
+
+        self.ff1 = ff1
+        self.ff2 = ff2
+
+    def __call__(self, tensor: torch.Tensor):
+        """
+        :param tensor: A tensor to perform feedforward on
+        :return tensor: The result of feedforward processing.
+        """
+        # Basically, we move the item dimension to the front
+        # of the tensor, apply the linear layers, and
+        # return the results
+
+        tensor = tensor.unsqueeze(0).transpose(0, -2).squeeze(-2)  # Transfer the item channel out of the wayh
+        tensor = self.ff1(tensor)  # (item, ..., (config), (ensemble), internal)
+        tensor = torch.relu(tensor)
+        tensor = self.ff2(tensor)  # (item,..., (config) , (ensemble), embedding)
+        tensor = tensor.unsqueeze(-2).transpose(0, -2).squeeze(0)  # Transfer item back into position
+        return tensor
+
+
 class FeedForward(nn.Module):
     """
     A feedforward layer for attention purposes.
@@ -58,6 +91,7 @@ class FeedForward(nn.Module):
 
     set_config can be used to set all the configurations properly and without issue.
     """
+    ForwardType = _FeedForward_Forward
     def __init__(self,
                  d_model: int,
                  d_internal: Optional[int] = None,

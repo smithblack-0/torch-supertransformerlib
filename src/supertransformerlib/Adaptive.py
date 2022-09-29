@@ -263,8 +263,7 @@ class AdaptiveAttention(nn.Module):
                  d_confidence: int,
                  d_assembly: int,
                  heads: int = 4,
-                 parallelization: Optional[Union[torch.Tensor, List[int], int]] = None,
-                 dynamics: Optional[int] = None):
+                 parallelization: Optional[Union[torch.Tensor, List[int], int]] = None):
         """
         :param d_query: The query embedding width
         :param d_key: The key embedding width
