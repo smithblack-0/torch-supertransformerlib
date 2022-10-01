@@ -223,12 +223,28 @@ class Linear(Utility, nn.Module):
 
 @torch.jit.script
 class ViewPoint:
+    """
+    A callable function for performing a viewpoint operation.
+
+    Is given a number of views, a view width,
+    a weight tensor, and an index tensor. May then
+    be called to create views of segments of a text.
+
+    Should be created by the ViewPointFactory.
+    """
     def __init__(self,
                  views: int,
                  view_width: int,
                  weights: torch.Tensor,
                  index: torch.Tensor,
                  ):
+        """
+
+        :param views: The number of views
+        :param view_width: The view width
+        :param weights: The weights tensor. In shape [..., views, query, top_k]
+        :param index: The index tensor. In shape [..., views, query, top_k]
+        """
         self.view_width = view_width
         self.views = views
         self.weights = weights

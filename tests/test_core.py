@@ -195,12 +195,99 @@ class test_ViewPoint(unittest.TestCase):
     using manually designed tests with known
     results.
     """
-    def test_viewpoint_one(self):
-        tensor = torch.tensor([[[1, 0],[0,1]]]
-        index = torch.tensor([]
+    def test_basic_viewpoint(self):
 
-        print(tensor.shape)
+        # Define situation
+        #
+        #
+        # Let there be two views.
+        # Let there be one query
+        # Let there be two batches
+        #
 
+
+        # Construct a batch to sample.
+        tensor_batch_1 = torch.tensor([[1, 0], [0, 1], [0.5, 0.5]])
+        tensor_batch_2 = torch.tensor([[2, 0,], [0, 3], [1.0, 1.0]])
+        tensor = torch.stack([tensor_batch_1, tensor_batch_2])
+
+        # Define sampling index.
+        #
+        # Let there be two views.
+        # Let there be one query
+        # Let there be two batches
+        #
+        # For the query:
+        # Let the first batch view from elements 0, 1. and again 0, 1,
+        # Let the second batch view from elements 0, 1, and then 1, 2
+
+        # Index_shape: (..., view, query, top_k)
+        index_batch_1 = torch.tensor([[0, 1],[0, 1]]).unsqueeze(-2)
+        index_batch_2 = torch.tensor([[0, 1], [1, 2]]).unsqueeze(-2)
+        index = torch.stack([index_batch_1, index_batch_2])
+
+        # Define weights
+        #
+        #
+        # Let there be two views.
+        # Let there be one query
+        # Let there be two batches
+        #
+        # On batch one,
+        # Let view 1 weight element 0 to max, view 2 weight element 1 to max
+        # On batch two
+        # Let view 1 weight both elements equally, let view 2 weight both elements equally
+
+        weights_batch_1 = torch.tensor([[1.0, 0], [0, 1.0]]).unsqueeze(-2)
+        weights_batch_2 = torch.tensor([[0.5, 0.5], [0.5, 0.5]]).unsqueeze(-2)
+        weights = torch.stack([weights_batch_1, weights_batch_2])
+
+        # Construct expected output.
+        #
+        # It is the case I expect to draw a window of size three for each view, and
+        # then put the views together for each batch. Construct each subview, then
+        # each view, then each batch.
+
+        batch1_view1_k1_sample = torch.tensor([[0, 0], [1., 0], [0, 1]])
+        batch1_view1_k2_sample = torch.tensor([[1, 0],[0,1],[0.5, 0.5]])
+        batch1_view1_sample = torch.stack([batch1_view1_k1_sample, batch1_view1_k2_sample], dim=-3)
+
+        batch1_view2_k1_sample = torch.tensor([[0, 0], [1., 0], [0, 1]])
+        batch1_view2_k2_sample = torch.tensor([[1, 0],[0,1],[0.5, 0.5]])
+        batch1_view2_sample = torch.stack([batch1_view2_k1_sample, batch1_view2_k2_sample], dim=-3)
+
+        batch1_sample = torch.stack([batch1_view1_sample, batch1_view2_sample], dim=0)
+
+        batch2_view1_k1_sample = torch.tensor([[0, 0],[2, 0], [0, 3.0]])
+        batch2_view1_k2_sample = torch.tensor([[2, 0],[0, 3],[1.0, 1.0]])
+
+        batch2_view1_sample = torch.stack([batch2_view1_k1_sample, batch2_view1_k2_sample], dim=-3)
+
+        batch2_view2_k1_sample = torch.tensor([[2, 0],[0, 3],[1.0, 1.0]])
+        batch2_view2_k2_sample = torch.tensor([[0, 3],[1.0, 1.0], [0, 0]])
+
+        batch2_view2_sample = torch.stack([batch2_view2_k1_sample, batch2_view2_k2_sample], dim=-3)
+
+        batch2_sample = torch.stack([batch2_view1_sample, batch2_view2_sample], dim=0)
+        tensor_sample = torch.stack([batch1_sample, batch2_sample], dim=0)
+        tensor_sample = tensor_sample.unsqueeze(-4)
+
+        #Weight the tensor sample. Eliminate k
+        tensor_sample = tensor_sample*weights.unsqueeze(-1).unsqueeze(-1)
+        expected_tensor = tensor_sample.sum(dim=-3)
+
+        # Run process
+
+        viewer = src.supertransformerlib.Core.ViewPoint(
+            views=2,
+            view_width=3,
+            weights=weights,
+            index=index
+        )
+
+        #Verify gather and such logic is working correctly
+        output = viewer(tensor)
+        self.assertTrue(torch.all(expected_tensor==output))
 
 class test_ViewpointFactory(unittest.TestCase):
     def test_constructor(self):
