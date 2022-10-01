@@ -141,3 +141,81 @@ class testLinear(unittest.TestCase):
         test_layer = torch.jit.script(test_layer)
         output = test_layer(test_tensor)
         self.assertTrue(output.shape == torch.Size([30, 10]))
+
+    def test_passable(self):
+        """Test whether or not passing and executing linear later on is possible"""
+        test_tensor = torch.randn([30, 20, 20])
+        test_layer = src.supertransformerlib.Core.Linear([20,20], 10, 30)
+        test_layer = torch.jit.script(test_layer)
+
+        @torch.jit.script
+        def perform_linear(forward: src.supertransformerlib.Core.Linear.ForwardType, tensor: torch.Tensor):
+            return forward(tensor)
+
+        forward = test_layer.setup_forward()
+        output = perform_linear(forward, test_tensor)
+        self.assertTrue(output.shape == torch.Size([30, 10]))
+
+    def test_gradient_passable(self):
+        """Test whether or not a passable feature updates on gradient descent"""
+
+        test_tensor = torch.randn([30, 20, 20])
+        test_layer = src.supertransformerlib.Core.Linear([20,20], 10, 30)
+        test_optim = torch.optim.SGD(test_layer.parameters(), lr=0.01)
+
+        test_layer = torch.jit.script(test_layer)
+
+        @torch.jit.script
+        def perform_linear(forward: src.supertransformerlib.Core.Linear.ForwardType, tensor: torch.Tensor):
+            return forward(tensor)
+
+
+
+        forward = test_layer.setup_forward()
+        output = perform_linear(forward, test_tensor)
+        output = output.sum()
+        output.backward()
+
+        test_optim.step()
+        test_optim.zero_grad()
+        new_output = perform_linear(forward, test_tensor)
+        new_output = new_output.sum()
+
+        print(new_output)
+        print(output)
+
+        self.assertTrue(new_output != output)
+
+
+class test_ViewPoint(unittest.TestCase):
+    """
+    Test the viewpoint mechanism.
+
+    Verify it currently functions correctly
+    using manually designed tests with known
+    results.
+    """
+    def test_viewpoint_one(self):
+        tensor = torch.tensor([[[1, 0],[0,1]]]
+        index = torch.tensor([]
+
+        print(tensor.shape)
+
+
+class test_ViewpointFactory(unittest.TestCase):
+    def test_constructor(self):
+        """test that the constructor works at all"""
+
+        src.supertransformerlib.Core.ViewPointFactory(32, 32, 8, 20, 4)
+
+
+    def test_viewpoint_shape(self):
+        query_tensor = torch.randn([2, 3, 32])
+        text_tensor = torch.randn([2, 10, 32])
+        factory = src.supertransformerlib.Core.ViewPointFactory(32, 32, 8, 5, 4)
+        viewpoint = factory(query_tensor, text_tensor)
+        expected_shape = torch.Size([2, 8, 3, 5, 32])
+
+        outcome = viewpoint(text_tensor)
+        self.assertTrue(expected_shape == outcome.shape)
+

@@ -1,4 +1,4 @@
-from typing import Optional, List, Union
+from typing import Optional, List, Union, Tuple
 
 import torch
 from torch import nn
@@ -122,75 +122,44 @@ class FeedForward(nn.Module):
             self.ff2 = Core.Linear(d_internal, d_model,
                                    parallel=parallelization,
                                    )
+    def setup_forward(self)->_FeedForward_Forward:
+        """
+        Sets up a callable function which will execute feedforward using
+        the current kernel. This is torchscript passable.
+        """
+        #Sets up the discrete forward class, which is
+        #passible through torchscript
+        return _FeedForward_Forward(self.ff1.setup_forward(),
+                                    self.ff2.setup_forward())
 
     def forward(self, tensor: torch.Tensor):
         """
         :param tensor: A tensor to perform feedforward on
         :return tensor: The result of feedforward processing.
         """
-        # Basically, we move the item dimension to the front
-        # of the tensor, apply the linear layers, and
-        # return the results
+        forward_call = self.setup_forward()
+        return forward_call(tensor)
 
-        tensor = tensor.unsqueeze(0).transpose(0, -2).squeeze(-2)  # Transfer the item channel out of the wayh
-        tensor = self.ff1(tensor)  # (item, ..., (config), (ensemble), internal)
-        tensor = self.activation(tensor)
-        tensor = self.ff2(tensor)  # (item,..., (config) , (ensemble), embedding)
-        tensor = tensor.unsqueeze(-2).transpose(0, -2).squeeze(0)  # Transfer item back into position
-        return tensor
-
-
-class MultiHeadedAttention(nn.Module, Core.Utility):
+@torch.jit.script
+class _MultiHeadedAttention_Forward:
     """
-    A Multiheaded Attention layer capable of
-    executing parallization alongside ensemble configured
-    assembly
+    A small torchscript class to do multiheaded
+    attention when given the current kernels.
 
-    --- parallelization ---
-
-    This is a feature better defined over on the Core.Linear
-    section. It may be defined just as in a linear layer,
-    and allows execution of a kernel across an entire tensor
-    independently and in parallel.
-
-    Long story short, the shape you place here will be
-    added onto the deployed kernels, such that a problem
-    with a tensor of shape (..., 20, 128) with
-    parallelization (10, 15) will require a tensor
-    of shape (..., 10, 15, 20, 128) and process each
-    defined dimensions with completely independent parameters
-
-
+    Works with the master class.
     """
-
     def __init__(self,
-                 d_query: int,
-                 d_content: int,
-                 d_output: int,
-                 heads: int,
-                 parallelization: Optional[Union[torch.Tensor, List[int], int]] = None,
+                 query_projector: Core.Linear.ForwardType,
+                 key_projector: Core.Linear.ForwardType,
+                 value_projector: Core.Linear.ForwardType,
+                 collapse_projector: Core.Linear.ForwardType
                  ):
-        """
+        self.query_projector = query_projector
+        self.key_projector = key_projector
+        self.value_projector = value_projector
+        self.collapse_projector = collapse_projector
 
-        :param d_query: The dimensions of the query's embeddings
-        :param d_content: The dimensions of the contents embedding
-        :param d_output: The output embedding
-        :param heads: The number of heads to initialize the MHA with.
-        :param parallelization: How much, and in what shape, to parallelize. Static.
-        :param dynamics: Whether or not to setup extra kernelspace for dynamic configuration.
-        """
-
-        super().__init__()
-
-        assert d_query % heads == 0
-        head_width = d_query // heads
-
-        self.query_projector = Core.Linear(d_query, [heads, head_width], parallel=parallelization)
-        self.key_projector = Core.Linear(d_content, [heads, head_width], parallel=parallelization)
-        self.value_projector = Core.Linear(d_content, [heads, head_width], parallel=parallelization)
-        self.collapse_projector = Core.Linear([heads, head_width], d_output, parallel=parallelization)
-
-    def forward(self,
+    def __call__(self,
                 query: torch.Tensor,
                 key: torch.Tensor,
                 value: torch.Tensor,
@@ -234,6 +203,132 @@ class MultiHeadedAttention(nn.Module, Core.Utility):
         return output
 
 
+class MultiHeadedAttention(nn.Module, Core.Utility):
+    """
+    A Multiheaded Attention layer capable of
+    executing parallization alongside ensemble configured
+    assembly
+
+    --- parallelization ---
+
+    This is a feature better defined over on the Core.Linear
+    section. It may be defined just as in a linear layer,
+    and allows execution of a kernel across an entire tensor
+    independently and in parallel.
+
+    Long story short, the shape you place here will be
+    added onto the deployed kernels, such that a problem
+    with a tensor of shape (..., 20, 128) with
+    parallelization (10, 15) will require a tensor
+    of shape (..., 10, 15, 20, 128) and process each
+    defined dimensions with completely independent parameters
+
+
+    """
+    ForwardType = _MultiHeadedAttention_Forward
+
+    def __init__(self,
+                 d_query: int,
+                 d_content: int,
+                 d_output: int,
+                 heads: int,
+                 parallelization: Optional[Union[torch.Tensor, List[int], int]] = None,
+                 ):
+        """
+
+        :param d_query: The dimensions of the query's embeddings
+        :param d_content: The dimensions of the contents embedding
+        :param d_output: The output embedding
+        :param heads: The number of heads to initialize the MHA with.
+        :param parallelization: How much, and in what shape, to parallelize. Static.
+        :param dynamics: Whether or not to setup extra kernelspace for dynamic configuration.
+        """
+
+        super().__init__()
+
+        assert d_query % heads == 0
+        head_width = d_query // heads
+
+        self.query_projector = Core.Linear(d_query, [heads, head_width], parallel=parallelization)
+        self.key_projector = Core.Linear(d_content, [heads, head_width], parallel=parallelization)
+        self.value_projector = Core.Linear(d_content, [heads, head_width], parallel=parallelization)
+        self.collapse_projector = Core.Linear([heads, head_width], d_output, parallel=parallelization)
+
+    def setup_forward(self)->_MultiHeadedAttention_Forward:
+        """
+        Sets up a torchscript passable forward
+        function for multihead attention.
+
+        Be warned: returned function call does not update
+        upon gradient descent.
+        """
+        return _MultiHeadedAttention_Forward(
+            self.query_projector.setup_forward(),
+            self.key_projector.setup_forward(),
+            self.value_projector.setup_forward(),
+            self.collapse_projector.setup_forward(),
+        )
+
+    def forward(self,
+                query: torch.Tensor,
+                key: torch.Tensor,
+                value: torch.Tensor,
+                mask: Optional[torch.Tensor] = None) -> torch.Tensor:
+        """
+
+
+        :param query: The query. Of shape (...,(dynamic), (...parallel), items, embedding)
+        :param key: The key, Of shape (..., (dynamic), (...parallel), content_items, embedding)
+        :param value: The value. Of shape, (..., (dynamic), (...parallel), content_items, embedding)
+        :param mask: A bool mask. True masks. Optional. Of shape (..., (ensemble), items, content_items)
+        :return: tensor. Attention result
+        """
+        forward_call = self.setup_forward()
+        return forward_call(query, key, value, mask)
+
+@torch.jit.script
+class _PIMU_Forward:
+    """
+    The forward call function for the pimu process
+    """
+    def __init__(self,
+                 query_projector: Core.Linear.ForwardType,
+                 key: nn.Parameter,
+                 value: nn.Parameter,
+                 dehead_projector: Core.Linear.ForwardType,
+                 ):
+
+        self.QueryProj = query_projector
+        self.Key = key
+        self.Value = value
+        self.DeheadProj = dehead_projector
+
+    def __call__(self, query: torch.Tensor) -> torch.Tensor:
+        """
+        :param query: A tensor to gain insight on
+        :return: The calibrated result of the query.
+        """
+
+        # Perform head generation
+
+        query = query.unsqueeze(0).transpose(-2, 0).squeeze(-2)  # (item, (dynamics), (..parallel), embedding)
+        query = self.QueryProj(query)
+        query = query.unsqueeze(-2).transpose(-2, 0).squeeze(0)
+
+        key = self.Key
+        value = self.Value
+
+        # Perform dot product attention=
+
+        attn = _dot_product_attention(query, key, value)  #
+
+        # Collapse heads, then return
+        attn = attn.unsqueeze(0).transpose(-2, 0).squeeze(-2)  # (item,...,(dynamics),(..parallel), head, head_dim)
+        output = self.DeheadProj(attn)
+        output = output.unsqueeze(-2).transpose(-2, 0).squeeze(0)
+        return output
+
+
 class PIMU(nn.Module, Core.Utility):
     """
     Parameter Injection Memory Unit. (PIMU)
@@ -260,6 +355,7 @@ class PIMU(nn.Module, Core.Utility):
     model down.
 
     """
+    ForwardType = _PIMU_Forward
 
     def __init__(self,
                  d_model: int,
@@ -299,29 +395,71 @@ class PIMU(nn.Module, Core.Utility):
         self.Key = nn.Parameter(key)
         self.Value = nn.Parameter(value)
         self.DeheadProj = Core.Linear([heads, head_channel_width], d_model, parallelization)
-
+    def setup_forward(self)->_PIMU_Forward:
+        """
+        Set up a passable, callable, forward function that
+        torchscript is happy to work with.
+        :return: A forward callable
+        """
+        return _PIMU_Forward(
+            self.QueryProj.setup_forward(),
+            self.Key,
+            self.Value,
+            self.DeheadProj.setup_forward()
+        )
     def forward(self, query: torch.Tensor) -> torch.Tensor:
         """
         :param query: A tensor to gain insight on
         :return: The calibrated result of the query.
         """
 
-        # Perform head generation
+        forward_call = self.setup_forward()
+        return forward_call(query)
 
-        query = query.unsqueeze(0).transpose(-2, 0).squeeze(-2)  # (item, (dynamics), (..parallel), embedding)
-        query = self.QueryProj(query)
-        query = query.unsqueeze(-2).transpose(-2, 0).squeeze(0)
+@torch.jit.script
+class _PISU_Forward:
+    """
+    The forward function for the PISU
+    unit.
+    """
+    def __init__(self,
+                 query: nn.Parameter,
+                 key_projector: Core.Linear.ForwardType,
+                 value_projector: Core.Linear.ForwardType,
+                 dehead_projector: Core.Linear.ForwardType
+                 ):
 
-        key = self.Key
-        value = self.Value
+        self.query = query
+        self.key_projector = key_projector
+        self.value_projector = value_projector
+        self.dehead_projector = dehead_projector
 
-        # Perform dot product attention=
+    def __call__(self, content: torch.Tensor) -> torch.Tensor:
+        """
+        :param content: (..., (ensembles), items, embeddings)
+        :return:
+        """
+        # content: (..., (parallel...), items, embeddings)
 
-        attn = _dot_product_attention(query, key, value)  #
+        # Prepare heads.
 
-        # Collapse heads, then return
-        attn = attn.unsqueeze(0).transpose(-2, 0).squeeze(-2)  # (item,...,(dynamics),(..parallel), head, head_dim)
-        output = self.DeheadProj(attn)
+        content = content.unsqueeze(0).transpose(0, -2).squeeze(-2)  # (item, ...,  (parallel...), embedding)
+
+        query = self.query  # ((parallel...),head, output_item, head_embed)
+        key = self.key_projector(content)  # (item, ..., (parallel), head, head_embed)
+        value = self.value_projector(content)  # (item, ..., (parallel...), head, head_embed)
+
+        key = key.unsqueeze(-2).transpose(0, -2).squeeze(0)  # (..., (parallel..), head, item, head_embed)
+        value = value.unsqueeze(-2).transpose(0, -2).squeeze(0)  # (..., (parallel..), head, item, head_embed)
+
+        # Perform dot product attention
+
+        attn = _dot_product_attention(query, key, value)  # (..., (parallel...), head, output_items, head_embed)
+
+        # Collapse heads and return
+
+        attn = attn.unsqueeze(0).transpose(0, -2).squeeze(-2)
+        output = self.dehead_projector(attn)
         output = output.unsqueeze(-2).transpose(-2, 0).squeeze(0)
         return output
 
@@ -342,6 +480,7 @@ class PISU(nn.Module, Core.Utility):
     Note that, as with PISU, an aggressive number of heads will
     allow more degrees of freedom, while fewer will allow less.
     """
+
 
     def __init__(self,
                  d_model: int,
@@ -376,34 +515,23 @@ class PISU(nn.Module, Core.Utility):
         self.value_projector = Core.Linear(d_model, [heads, head_width], parallelization)
         self.dehead = Core.Linear([heads, head_width], d_output, parallelization)
 
+    def setup_forward(self) -> _PISU_Forward:
+        """Setup a callable forward function"""
+        return _PISU_Forward(
+            self.query,
+            self.key_projector.setup_forward(),
+            self.value_projector.setup_forward(),
+            self.dehead.setup_forward(),
+        )
+
     def forward(self, content: torch.Tensor) -> torch.Tensor:
         """
         :param content: (..., (ensembles), items, embeddings)
         :return:
         """
-        # content: (..., (parallel...), items, embeddings)
+        forward_call = self.setup_forward()
+        return forward_call(content)
 
-        # Prepare heads.
-
-        content = content.unsqueeze(0).transpose(0, -2).squeeze(-2)  # (item, ...,  (parallel...), embedding)
-
-        query = self.query  # ((parallel...),head, output_item, head_embed)
-        key = self.key_projector(content)  # (item, ..., (parallel), head, head_embed)
-        value = self.value_projector(content)  # (item, ..., (parallel...), head, head_embed)
-
-        key = key.unsqueeze(-2).transpose(0, -2).squeeze(0)  # (..., (parallel..), head, item, head_embed)
-        value = value.unsqueeze(-2).transpose(0, -2).squeeze(0)  # (..., (parallel..), head, item, head_embed)
-
-        # Perform dot product attention
-
-        attn = _dot_product_attention(query, key, value)  # (..., (parallel...), head, output_items, head_embed)
-
-        # Collapse heads and return
-
-        attn = attn.unsqueeze(0).transpose(0, -2).squeeze(-2)
-        output = self.dehead(attn)
-        output = output.unsqueeze(-2).transpose(-2, 0).squeeze(0)
-        return output
 
 
 class LCSA(nn.Module, Core.Utility):
@@ -518,3 +646,4 @@ class LCSA(nn.Module, Core.Utility):
         outcome = self.dehead(attn)  # #(items, ..., (parallel...), d_model)
         outcome = outcome.unsqueeze(-2).transpose(-2, 0).squeeze(0)
         return outcome
+

@@ -30,7 +30,7 @@ class Utility:
         return output
 
 @torch.jit.script
-class Linear_Forward:
+class _Linear_Forward:
     """
     The linear forward mechanism.
 
@@ -123,7 +123,7 @@ class Linear(Utility, nn.Module):
 
 
     """
-    ForwardType = Linear_Forward
+    ForwardType = _Linear_Forward
     def __init__(self,
                  input_shape: Union[torch.Tensor, List[int], int],
                  output_shape: Union[torch.Tensor, List[int], int],
@@ -191,22 +191,22 @@ class Linear(Utility, nn.Module):
         if use_bias:
             self.bias_kernel = bias_kernel
 
-    def load_kernel(self)->Linear_Forward:
+    def setup_forward(self)->_Linear_Forward:
         """
         Returns (basically) a torchscript passible linear forward function
-        call. Type can be gotten from ForwardType variable on main class.
+        call.
 
         """
         if self.use_bias:
-            return Linear_Forward(self.input_map_reference,
-                                  self.output_map_reference,
-                                  self.matrix_kernel,
-                                  self.bias_kernel)
+            return _Linear_Forward(self.input_map_reference,
+                                   self.output_map_reference,
+                                   self.matrix_kernel,
+                                   self.bias_kernel)
         else:
-            return Linear_Forward(self.input_map_reference,
-                                  self.output_map_reference,
-                                  self.matrix_kernel,
-                                  torch.zeros([1], device=self.matrix_kernel.device))
+            return _Linear_Forward(self.input_map_reference,
+                                   self.output_map_reference,
+                                   self.matrix_kernel,
+                                   torch.zeros([1], device=self.matrix_kernel.device))
 
     def forward(self, tensor: torch.Tensor):
         """
@@ -216,7 +216,118 @@ class Linear(Utility, nn.Module):
         """
         # Torchscript does not like to pass around layers, but I do.
         # To get around this, the majority of the feedforward mechanism is
-        # located in the Linear_Forward class.
+        # located in the _Linear_Forward class.
 
-        forward_call = self.load_kernel()
+        forward_call = self.setup_forward()
         return forward_call(tensor)
+
+@torch.jit.script
+class ViewPoint:
+    def __init__(self,
+                 views: int,
+                 view_width: int,
+                 weights: torch.Tensor,
+                 index: torch.Tensor,
+                 ):
+        self.view_width = view_width
+        self.views = views
+        self.weights = weights
+        self.index = index
+
+    def __call__(self, tensor: torch.Tensor)->torch.Tensor:
+
+
+        #Generate the draw source. This will be a memory efficient strided
+        #view of the input tensor
+
+        strided_source = tensor.unsqueeze(0).transpose(0, -1).squeeze(-1)
+        strided_source = Glimpses.dilocal(strided_source,
+                                          self.view_width,
+                                          1,
+                                          [1]) # (..parallel), viewpoint, item, local, viewpoint_dim)
+        strided_source = strided_source.squeeze(-3)
+        strided_source = strided_source.unsqueeze(-1).transpose(-1, 0).squeeze(0)
+
+        #The following code sets up a gather
+        #
+        #This consists of getting the index and strided source the same shape,
+        #then using expand to ensure gather will select all required index.
+        #
+        #Gather basically expects, along each non-gathered dimension, a
+        #list indicating what elements to grab.
+
+        index = self.index.unsqueeze(-1).unsqueeze(-1)
+        strided_source = strided_source.unsqueeze(-4).unsqueeze(-4)
+
+        index_expansion = [-1]*index.dim()
+        source_expansion = [-1]*strided_source.dim()
+
+        source_expansion[-4] = index.shape[-4]
+        source_expansion[-5] = index.shape[-5]
+        index_expansion[-1] = strided_source.shape[-1]
+        index_expansion[-2] = strided_source.shape[-2]
+
+        index = index.expand(index_expansion)
+        strided_source = strided_source.expand(source_expansion)
+        gathered_viewpoint = torch.gather(strided_source, dim=-3, index=  index)
+
+        #Weight the viewpoints, combine them together, then return the result
+
+        gathered_viewpoint = gathered_viewpoint*self.weights.unsqueeze(-1).unsqueeze(-1)
+        output = gathered_viewpoint.sum(-3)
+        return output
+
+
+class ViewPointFactory(nn.Module):
+    """
+    A factory for making a ViewPoint, which is
+    a map that returns a sequence of tensors with each
+    tensor being corrolated to a distinct section of
+    text.
+    """
+
+    def __init__(self,
+                 d_query,
+                 d_key,
+                 viewpoints: int,
+                 viewpoint_width: int,
+                 top_k: int,
+                 parallelization: Optional[Union[torch.Tensor, List[int], int]] = None,
+                 ):
+        super().__init__()
+        d_viewpoint = d_query // viewpoints
+        self.viewpoints = viewpoints
+        self.query_projector = Linear(d_query, [viewpoints, d_viewpoint], parallelization)
+        self.key_projector = Linear(d_key, [viewpoints, d_viewpoint], parallelization)
+        self.width = viewpoint_width
+        self.top_k = top_k
+
+    def forward(self, query, key) -> ViewPoint:
+        # Generate the viewpoint dims
+        query = query.unsqueeze(0).transpose(-2, 0).squeeze(-2)  # (item, , (..parallel), embedding)
+        key = key.unsqueeze(0).transpose(-2, 0).squeeze(-2)  # (item, , (..parallel), embedding)
+
+        viewpoint_query = self.query_projector(query)  # (item ..., , (..parallel), viewpoint, viewpoint_dim)
+        viewpoint_key = self.key_projector(key)  # (item ..., , (..parallel), viewpoint, viewpoint_dim)
+
+        viewpoint_query = viewpoint_query.unsqueeze(-2).transpose(0, -2).squeeze(
+            0)  # ...,, (..parallel), viewpoint, item, viewpoint_dim)
+        viewpoint_key = viewpoint_key.unsqueeze(-2).transpose(0, -2).squeeze(
+            0)  # ..., , (..parallel), viewpoint, item, viewpoint_dim)
+
+        # Sort out the candidates. Generate the index.
+
+        score = torch.matmul(viewpoint_query, viewpoint_key.transpose(-1, -2))
+        score, index = torch.sort(score, dim=-1, descending=True)
+        index = index[..., :self.top_k]
+        score = score[..., :self.top_k]
+        score = torch.softmax(score, dim=-1)
+
+        #Return the viewpoint.
+
+        return ViewPoint(self.viewpoints,
+                         self.width,
+                         score,
+                         index)
+
+

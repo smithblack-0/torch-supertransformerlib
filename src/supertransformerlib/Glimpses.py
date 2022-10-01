@@ -9,9 +9,9 @@ do something with it. They also tend to return views to allow efficient memory u
 """
 
 import torch
+from torch import nn
 from torch.nn import functional as F
-from typing import Union, List
-
+from typing import Union, List, Optional
 
 def view(tensor,
          input_shape: Union[torch.Tensor, List[int], int],
@@ -94,7 +94,7 @@ def _strided_reshape(tensor: torch.Tensor, input_shape: torch.Tensor, output_sha
     output: torch.Tensor = tensor.reshape(final_shape)
     return output
 
-
+@torch.jit.script
 def reshape(tensor,
             input_shape: Union[torch.Tensor, List[int], int],
             output_shape: Union[torch.Tensor, List[int], int]) -> torch.Tensor:
@@ -237,7 +237,6 @@ def local(tensor: torch.Tensor,
     final_stride: List[int] = final_stride.tolist()
     return tensor[..., start_offset:-end_offset].as_strided(final_shape, final_stride)
 
-
 @torch.jit.script
 def dilocal(tensor: torch.Tensor,
             kernel_width: int,
@@ -312,18 +311,3 @@ def dilocal(tensor: torch.Tensor,
     return output
 
 
-def block(tensor, number):
-    """
-
-    Descrption:
-
-    The purpose of this function is to split up the tensor
-    into number equally sized units as a view.
-
-    Excess is simply discarded.
-
-    :param tensor:
-    :param blocks:
-    :return:
-    """
-    pass
