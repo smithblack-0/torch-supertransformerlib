@@ -205,8 +205,8 @@ class test_ViewPoint(unittest.TestCase):
         # Let there be two batches
         #
 
-
         # Construct a batch to sample.
+
         tensor_batch_1 = torch.tensor([[1, 0], [0, 1], [0.5, 0.5]])
         tensor_batch_2 = torch.tensor([[2, 0,], [0, 3], [1.0, 1.0]])
         tensor = torch.stack([tensor_batch_1, tensor_batch_2])

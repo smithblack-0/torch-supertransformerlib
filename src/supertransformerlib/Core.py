@@ -37,6 +37,10 @@ class _Linear_Forward:
     Accepts the input map, the output map,
     kernel, and bias. Produced by kernel
     loader.
+
+    The batch mask parameter can be used to
+    tell the layer to not run calculations
+    on certain batch dimensions.
     """
 
     def __init__(self,
@@ -52,6 +56,7 @@ class _Linear_Forward:
 
     def __call__(self,
                 tensor: torch.Tensor,
+                batch_mask: Optional[torch.Tensor] = None,
                 ):
         input_shape, row_length = self.input_map
         column_length, output_shape = self.output_map
