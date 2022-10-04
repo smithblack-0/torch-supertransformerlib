@@ -130,7 +130,7 @@ class AddressBook(nn.Module):
 
         index = self.addresses[0]
         ids = self.addresses[1]
-        used = ids > 0
+        used = ids >= 0
         return index.masked_select(used)
 
     def _get_free_address_indices(self) -> torch.Tensor:
@@ -141,7 +141,7 @@ class AddressBook(nn.Module):
 
         index = self.addresses[0]
         ids = self.addresses[1]
-        free = ids == 0
+        free = ids < 0
         return index.masked_select(free)
 
     def _get_pointer_indices(self, pointer_ids: torch.Tensor, task: str):
@@ -253,13 +253,12 @@ class AddressBook(nn.Module):
         Take a list of pointer ids. Dereferences them, telling us
         what memory address it is pointing to. Do it quickly.
 
-        :param pointer_ids: An int64 tensor representing the pointers to dereference.
+        :param pointer_ids: An int64 tensor representing the pointers to dereference. May be any shape
         :return: The dereferenced addresses, whatever they may be.
         :raise NullPtr: If pointer is not found.
         :raise BadPtr: If something goes terribly wrong.
         """
 
-        assert pointer_ids.dim() == 1
         assert pointer_ids.dtype == torch.int64
         assert torch.all(pointer_ids >= 0)
 
@@ -298,7 +297,7 @@ class AddressBook(nn.Module):
         length = memory_addresses.shape[0]
 
         index = torch.arange(length, device=memory_addresses.device, dtype=torch.int64)
-        key = torch.zeros_like(memory_addresses, device=memory_addresses.device, dtype=torch.int64)
+        key = -torch.ones_like(memory_addresses, device=memory_addresses.device, dtype=torch.int64)
         address_book = torch.stack([index, key, memory_addresses], dim=0)
 
         addresses = address_book

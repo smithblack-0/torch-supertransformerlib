@@ -47,6 +47,7 @@ class test_AddressBook(unittest.TestCase):
         addresses_wrong_dtype = torch.randn(120)
         addresses_empty = torch.empty([0])
 
+        #tests
         test_should_pass(addresses_naive)
         test_should_pass(addresses_shifted)
         test_should_pass(addresses_negative)
@@ -55,6 +56,7 @@ class test_AddressBook(unittest.TestCase):
         test_should_fail(addresses_wrong_shape, AssertionError)
         test_should_fail(addresses_wrong_dtype, AssertionError)
         test_should_fail(addresses_empty, AssertionError)
+
     def test_basics_series_malloc(self):
         """Test the memory allocator is working, ignoring any interactions with other methods."""
 
@@ -149,6 +151,75 @@ class test_AddressBook(unittest.TestCase):
         test_should_fail(wrong_dtype, AssertionError)
         test_should_fail_double(double_overfull_a, double_overfull_b, RuntimeError)
         test_should_fail_double(attempt_reassign_a, attempt_reassign_b, RuntimeError)
+
+    def test_basic_series_dereference(self):
+        """Test that dereference is working properly"""
+
+        addresses = torch.arange(120)
+        malloc_pointers = torch.arange(40)
+
+        def test_should_succeed(pointers: torch.Tensor, expected: torch.Tensor):
+
+            #Standard
+            addressbook = src.supertransformerlib.Core.AddressBook(addresses)
+            addressbook.malloc(malloc_pointers)
+            output = addressbook.dereference(pointers)
+            self.assertTrue(torch.all(expected == output))
+
+            #Torchscript
+            addressbook = src.supertransformerlib.Core.AddressBook(addresses)
+            addressbook = torch.jit.script(addressbook)
+            addressbook.malloc(malloc_pointers)
+            output = addressbook.dereference(pointers)
+            self.assertTrue(torch.all(expected == output))
+
+        def test_should_fail(pointers: torch.Tensor, error: Type[Exception]):
+
+            #Standard
+
+            def to_fail():
+                addressbook = src.supertransformerlib.Core.AddressBook(addresses)
+                addressbook.malloc(malloc_pointers)
+                output = addressbook.dereference(pointers)
+
+            self.assertRaises(error, to_fail)
+
+            #Torchscript
+            def to_fail():
+                addressbook = src.supertransformerlib.Core.AddressBook(addresses)
+                addressbook = torch.jit.script(addressbook)
+                try:
+                    addressbook.malloc(malloc_pointers)
+                    output = addressbook.dereference(pointers)
+                except torch.jit.Error:
+                    raise error("mockup", torch.tensor([3]))
+
+            self.assertRaises(error, to_fail)
+
+        #Should pass
+
+        partial, partial_expected = torch.arange(20), torch.arange(20)
+        full, full_expected = torch.arange(40), torch.arange(40)
+        out_of_order, out_of_order_expected = torch.arange(20).flip(dims=[-1]), torch.arange(20).flip(dims=[-1])
+        nd, nd_expected = torch.arange(40).view(5, 2, 4), torch.arange(40).view(5,2,4)
+
+        #Should fail
+
+        null_ptr = torch.arange(40) + 1
+        invalid_ptr = torch.arange(40) - 1
+        bad_dtype = torch.ones([10], dtype=torch.int32)
+
+        #Tests
+
+        test_should_succeed(partial, partial_expected)
+        test_should_succeed(full, full_expected)
+        test_should_succeed(out_of_order, out_of_order_expected)
+        test_should_succeed(nd, nd_expected)
+
+        test_should_fail(null_ptr, src.supertransformerlib.Core.NullPtr)
+        test_should_fail(invalid_ptr, AssertionError)
+        test_should_fail(bad_dtype, AssertionError)
+
 
 class testLinear(unittest.TestCase):
     """
