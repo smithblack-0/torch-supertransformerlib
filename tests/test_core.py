@@ -1,4 +1,6 @@
 import unittest
+from typing import Type
+
 import torch
 from torch import nn
 import torch.nn
@@ -11,28 +13,142 @@ import src.supertransformerlib.Core
 # These must be located at the top level so pickle
 # is happy
 
-class buffer_mockup(nn.Module):
-    """
-    Dynamically varying kernel
-    Simple task: add
+class test_AddressBook(unittest.TestCase):
     """
 
-    def __init__(self):
-        super().__init__(5, top_p=0.5)
+    Tests the address book. This is a memory manager built
+    (ugh) in python which can be used to make pointers
+    within an address space. The class is initialized
+    with the space to address, which must be finite,
+    and can then be passed nonnegative integers to associate
+    with the address space.
+    """
 
-        self.d_model = 20
-        self.batch_fun = 4
-        self.kernel = torch.randn([self.native_ensemble_width, self.d_model])
-        self.kernel = nn.Parameter(self.kernel)
-        self.register_ensemble("kernel")
+    def test_basics_series_constructor(self):
+        """Test that the constructor works at all"""
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        config = torch.randn([self.batch_fun, self.native_ensemble_width])
-        self.set_config(config, True)
-        return x + self.kernel
+        def test_should_pass(addresses: torch.Tensor):
+            src.supertransformerlib.Core.AddressBook(addresses)
+        def test_should_fail(addresses: torch.Tensor, error: Type[Exception]):
+            def to_fail():
+                src.supertransformerlib.Core.AddressBook(addresses)
+            self.assertRaises(error, to_fail)
 
-#Fixtures. Must be top level for pickle to handle
+        
+        #Should pass
+        addresses_naive = torch.arange(120)
+        addresses_shifted = torch.arange(120) + 30
+        addresses_negative = torch.arange(120) - 10
+        addresses_only_one = torch.tensor([0])
 
+        #Should fail
+
+        addresses_wrong_shape = torch.arange(1000).view(10, 10, 10)
+        addresses_wrong_dtype = torch.randn(120)
+        addresses_empty = torch.empty([0])
+
+        test_should_pass(addresses_naive)
+        test_should_pass(addresses_shifted)
+        test_should_pass(addresses_negative)
+        test_should_pass(addresses_only_one)
+
+        test_should_fail(addresses_wrong_shape, AssertionError)
+        test_should_fail(addresses_wrong_dtype, AssertionError)
+        test_should_fail(addresses_empty, AssertionError)
+    def test_basics_series_malloc(self):
+        """Test the memory allocator is working, ignoring any interactions with other methods."""
+
+        addresses = torch.arange(120)
+        def test_should_pass(pointer_ids: torch.Tensor):
+            addressbook = src.supertransformerlib.Core.AddressBook(addresses)
+            addressbook.malloc(pointer_ids)
+
+            addressbook = src.supertransformerlib.Core.AddressBook(addresses)
+            addressbook = torch.jit.script(addressbook)
+            addressbook.malloc(pointer_ids)
+
+        def test_should_pass_double(
+                                    pointers1: torch.Tensor,
+                                    pointers2: torch.Tensor):
+            addressbook = src.supertransformerlib.Core.AddressBook(addresses)
+            addressbook.malloc(pointers1)
+            addressbook.malloc(pointers2)
+
+            addressbook = src.supertransformerlib.Core.AddressBook(addresses)
+            addressbook = torch.jit.script(addressbook)
+            addressbook.malloc(pointers1)
+            addressbook.malloc(pointers2)
+
+        def test_should_fail(
+                             pointer_ids: torch.Tensor,
+                             error: Type[Exception]):
+
+            def to_fail():
+                addressbook = src.supertransformerlib.Core.AddressBook(addresses)
+                addressbook.malloc(pointer_ids)
+            self.assertRaises(error, to_fail)
+
+            def to_fail():
+                addressbook = src.supertransformerlib.Core.AddressBook(addresses)
+                addressbook = torch.jit.script(addressbook)
+                try:
+                    addressbook.malloc(pointer_ids)
+                except torch.jit.Error:
+                    raise error
+
+            self.assertRaises(error, to_fail)
+
+        def test_should_fail_double(
+                             pointers1: torch.Tensor,
+                             pointers2: torch.Tensor,
+                             error: Type[Exception]):
+            def to_fail():
+                addressbook = src.supertransformerlib.Core.AddressBook(addresses)
+                addressbook.malloc(pointers1)
+                addressbook.malloc(pointers2)
+
+            self.assertRaises(error, to_fail)
+
+            def to_fail():
+                addressbook = src.supertransformerlib.Core.AddressBook(addresses)
+                addressbook = torch.jit.script(addressbook)
+                try:
+                    addressbook.malloc(pointers1)
+                    addressbook.malloc(pointers2)
+                except torch.jit.Error:
+                    raise error
+
+            self.assertRaises(error, to_fail)
+
+        #Should pass
+
+        completely_full = torch.arange(120, dtype=torch.int64)
+        shifted = torch.arange(120, dtype=torch.int64) + 1000
+        partially_full = torch.arange(30, dtype=torch.int64)
+
+        double_a_full, double_b_full = torch.arange(100, dtype=torch.int64), torch.arange(20, dtype=torch.int64) + 100
+        partial_a_full, partial_b_full = torch.arange(20, dtype=torch.int64), torch.arange(20, dtype=torch.int64) + 20
+
+        #Should fail
+
+        overfull = torch.arange(130, dtype=torch.int64)
+        double_overfull_a, double_overfull_b = torch.arange(20, dtype=torch.int64), torch.arange(130, dtype=torch.int64) + 20
+        attempt_reassign_a, attempt_reassign_b = torch.arange(120, dtype=torch.int64), torch.arange(120, dtype=torch.int64) #Notably, should warn.
+        wrong_dtype = torch.arange(120, dtype=torch.int16)
+
+        #Tests
+
+        test_should_pass(completely_full)
+        test_should_pass(shifted)
+        test_should_pass(partially_full)
+
+        test_should_pass_double(double_a_full, double_b_full)
+        test_should_pass_double(partial_a_full, partial_b_full)
+
+        test_should_fail(overfull, RuntimeError)
+        test_should_fail(wrong_dtype, AssertionError)
+        test_should_fail_double(double_overfull_a, double_overfull_b, RuntimeError)
+        test_should_fail_double(attempt_reassign_a, attempt_reassign_b, RuntimeError)
 
 class testLinear(unittest.TestCase):
     """
@@ -185,6 +301,8 @@ class testLinear(unittest.TestCase):
         print(output)
 
         self.assertTrue(new_output != output)
+
+
 
 
 class test_ViewPoint(unittest.TestCase):
