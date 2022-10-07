@@ -6,12 +6,118 @@ from torch import nn
 import torch.nn
 import itertools
 import src.supertransformerlib.Core
+import src.supertransformerlib.Core as Core
 
 
 ### Fixtures ###
 #
 # These must be located at the top level so pickle
 # is happy
+
+class test_functions(unittest.TestCase):
+    def test_standardize(self):
+        """
+        Test the ability of the standardize function to perform standardization.
+        """
+
+        case_one = 5
+        case_two = [4, 5]
+        case_three = torch.tensor([5, 6, 7])
+
+        Core.standardize_input(case_one)
+        Core.standardize_input(case_two)
+        Core.standardize_input(case_three)
+    def test_validate_shape(self):
+        """
+        Test the ability of validate shape to correctly
+        validate incoming shape information.
+        """
+        #Test fixtures
+
+        def test_valid(tensor: torch.Tensor):
+            #Standard
+            Core.validate_shape_tensor(tensor)
+
+            #torchscript
+
+            func = torch.jit.script(Core.validate_shape_tensor)
+            func(tensor)
+
+
+        def test_invalid(tensor: torch.Tensor):
+
+            #Standard
+            try:
+                Core.validate_shape_tensor(tensor)
+                self.assertTrue(False)
+            except ValueError as err:
+                pass
+            #Torchscript
+
+            func = torch.jit.script(Core.validate_shape_tensor)
+            try:
+                func(tensor)
+                raise RuntimeError("Did not stop")
+            except torch.jit.Error as err:
+                pass
+
+        #Valid cases
+
+        good_one = torch.tensor([1])
+        good_two = torch.tensor([1, 10, 20])
+
+        #Invalid cases
+
+        invalid_shape = torch.randint(0, 10, [1, 10])
+        invalid_dtype = torch.randn([10])
+        invalid_dim = torch.tensor([-5, 2])
+
+        #Run tests
+
+        test_valid(good_one)
+        test_valid(good_two)
+
+        test_invalid(invalid_shape)
+        test_invalid(invalid_dtype)
+        test_invalid(invalid_dim)
+    def test_validate_string_in_options(self):
+
+        def test_succeed(string, stringname, options, optionsname):
+
+            #Test standard
+            Core.validate_string_in_options(string, stringname, options, optionsname)
+
+            #Test torchscript
+            func = torch.jit.script(Core.validate_string_in_options)
+            func(string, stringname, options, optionsname)
+
+        def test_failure(string, stringname, options, optionsname):
+            #Test standard
+
+            try:
+                Core.validate_string_in_options(string, stringname, options, optionsname)
+            except ValueError as err:
+                print(err)
+
+            #Test torchscript
+            func = torch.jit.script(Core.validate_string_in_options)
+            try:
+                func(string, stringname, options, optionsname)
+            except torch.jit.Error:
+                pass
+            except RuntimeError:
+                pass
+
+
+        #Define cases
+
+        succeed = ("standard", "mode", ("standard", "advanced"), "modes")
+        wrong_type = (10, "mode", ("standard", "advanced"), "modes")
+        not_in = ("orthogonal", "mode", ("standard", "advanced"), "modes")
+
+        test_succeed(*succeed)
+        test_failure(*wrong_type)
+        test_failure(*not_in)
 
 class test_AddressBook(unittest.TestCase):
     """
@@ -28,10 +134,10 @@ class test_AddressBook(unittest.TestCase):
         """Test that the constructor works at all"""
 
         def test_should_pass(addresses: torch.Tensor):
-            src.supertransformerlib.Core.AddressBook(addresses)
+            src.supertransformerlib.Core.AddressSpace(addresses)
         def test_should_fail(addresses: torch.Tensor, error: Type[Exception]):
             def to_fail():
-                src.supertransformerlib.Core.AddressBook(addresses)
+                src.supertransformerlib.Core.AddressSpace(addresses)
             self.assertRaises(error, to_fail)
 
         
@@ -62,21 +168,21 @@ class test_AddressBook(unittest.TestCase):
 
         addresses = torch.arange(120)
         def test_should_pass(pointer_ids: torch.Tensor):
-            addressbook = src.supertransformerlib.Core.AddressBook(addresses)
+            addressbook = src.supertransformerlib.Core.AddressSpace(addresses)
             addressbook.malloc(pointer_ids)
 
-            addressbook = src.supertransformerlib.Core.AddressBook(addresses)
+            addressbook = src.supertransformerlib.Core.AddressSpace(addresses)
             addressbook = torch.jit.script(addressbook)
             addressbook.malloc(pointer_ids)
 
         def test_should_pass_double(
                                     pointers1: torch.Tensor,
                                     pointers2: torch.Tensor):
-            addressbook = src.supertransformerlib.Core.AddressBook(addresses)
+            addressbook = src.supertransformerlib.Core.AddressSpace(addresses)
             addressbook.malloc(pointers1)
             addressbook.malloc(pointers2)
 
-            addressbook = src.supertransformerlib.Core.AddressBook(addresses)
+            addressbook = src.supertransformerlib.Core.AddressSpace(addresses)
             addressbook = torch.jit.script(addressbook)
             addressbook.malloc(pointers1)
             addressbook.malloc(pointers2)
@@ -86,12 +192,12 @@ class test_AddressBook(unittest.TestCase):
                              error: Type[Exception]):
 
             def to_fail():
-                addressbook = src.supertransformerlib.Core.AddressBook(addresses)
+                addressbook = src.supertransformerlib.Core.AddressSpace(addresses)
                 addressbook.malloc(pointer_ids)
             self.assertRaises(error, to_fail)
 
             def to_fail():
-                addressbook = src.supertransformerlib.Core.AddressBook(addresses)
+                addressbook = src.supertransformerlib.Core.AddressSpace(addresses)
                 addressbook = torch.jit.script(addressbook)
                 try:
                     addressbook.malloc(pointer_ids)
@@ -105,14 +211,14 @@ class test_AddressBook(unittest.TestCase):
                              pointers2: torch.Tensor,
                              error: Type[Exception]):
             def to_fail():
-                addressbook = src.supertransformerlib.Core.AddressBook(addresses)
+                addressbook = src.supertransformerlib.Core.AddressSpace(addresses)
                 addressbook.malloc(pointers1)
                 addressbook.malloc(pointers2)
 
             self.assertRaises(error, to_fail)
 
             def to_fail():
-                addressbook = src.supertransformerlib.Core.AddressBook(addresses)
+                addressbook = src.supertransformerlib.Core.AddressSpace(addresses)
                 addressbook = torch.jit.script(addressbook)
                 try:
                     addressbook.malloc(pointers1)
@@ -161,13 +267,13 @@ class test_AddressBook(unittest.TestCase):
         def test_should_succeed(pointers: torch.Tensor, expected: torch.Tensor):
 
             #Standard
-            addressbook = src.supertransformerlib.Core.AddressBook(addresses)
+            addressbook = src.supertransformerlib.Core.AddressSpace(addresses)
             addressbook.malloc(malloc_pointers)
             output = addressbook.dereference(pointers)
             self.assertTrue(torch.all(expected == output))
 
             #Torchscript
-            addressbook = src.supertransformerlib.Core.AddressBook(addresses)
+            addressbook = src.supertransformerlib.Core.AddressSpace(addresses)
             addressbook = torch.jit.script(addressbook)
             addressbook.malloc(malloc_pointers)
             output = addressbook.dereference(pointers)
@@ -178,7 +284,7 @@ class test_AddressBook(unittest.TestCase):
             #Standard
 
             def to_fail():
-                addressbook = src.supertransformerlib.Core.AddressBook(addresses)
+                addressbook = src.supertransformerlib.Core.AddressSpace(addresses)
                 addressbook.malloc(malloc_pointers)
                 output = addressbook.dereference(pointers)
 
@@ -186,7 +292,7 @@ class test_AddressBook(unittest.TestCase):
 
             #Torchscript
             def to_fail():
-                addressbook = src.supertransformerlib.Core.AddressBook(addresses)
+                addressbook = src.supertransformerlib.Core.AddressSpace(addresses)
                 addressbook = torch.jit.script(addressbook)
                 try:
                     addressbook.malloc(malloc_pointers)
@@ -220,6 +326,240 @@ class test_AddressBook(unittest.TestCase):
         test_should_fail(invalid_ptr, AssertionError)
         test_should_fail(bad_dtype, AssertionError)
 
+
+class test_DynamicKernelReservoir(unittest.TestCase):
+    """
+    Test the dynamic kernel reservoir system.
+
+    Verify it will work correctly.
+    """
+    def test_constructor(self):
+
+        def successful_constructor(
+                kernel_shape,
+                resevoir_size,
+                mode
+        ):
+
+            layer = Core.DynamicKernelReservoir(kernel_shape, resevoir_size, mode)
+            layer = torch.jit.script(layer)
+
+        def fail_constructor(
+                kernel_shape,
+                reservoir_size,
+                mode,
+        ):
+
+            try:
+                layer = Core.DynamicKernelReservoir(kernel_shape, reservoir_size, mode)
+                raise RuntimeError("Did not raise an error")
+            except Core.ReservoirError as err:
+                pass
+
+        #Setup parameters for test
+        succeed_a = (1, 1, None)
+        succeed_b = ([10, 10], 20, "sparse")
+        succeed_c = ([10, 10, 4, 3], 5, "dense")
+
+        fail_kerneltype = ("potato", 20, None)
+        fail_kernelshape = ([-10, 5], 20, None)
+        fail_mode = ([10, 10], 5, "illegal")
+        fail_reservoir_shape = ([10, 10], -30, None)
+
+        #Run tests
+
+        successful_constructor(*succeed_a)
+        successful_constructor(*succeed_b)
+        successful_constructor(*succeed_c)
+
+        fail_constructor(*fail_kerneltype)
+        fail_constructor(*fail_kernelshape)
+        fail_constructor(*fail_mode)
+        fail_constructor(*fail_reservoir_shape)
+
+    def test_validate_raw_key(self):
+        """ Test that the mechanism for validating a key covered all the bases"""
+
+        shape = [10, 10, 10]
+        mode = "id"
+        reservoir = 10
+        layer = Core.DynamicKernelReservoir(shape, reservoir, mode)
+
+        def successful_test(key: torch.Tensor):
+
+            #Standard
+
+            layer._validate_raw_key("Testing", key)
+
+            #torchscript
+            func = torch.jit.script_method(layer._validate_raw_key)
+
+
+        def failure_test(key: torch.Tensor, torchscript = True):
+
+            #Standard
+
+            try:
+                layer._validate_raw_key("Testing", key)
+            except Core.ReservoirKeyError as err:
+                print(err)
+
+            #Torchscript
+
+            if torchscript:
+                func = torch.jit.script_method(layer._validate_raw_key)
+
+        #Define cases
+
+        good_key_a = torch.arange(7)
+        good_key_b = torch.randint(0, 10, [10, 10, 10])
+
+        bad_type = "Potato"
+        bad_dtype = torch.arange(3).to(dtype=torch.float32)
+        key_too_low = torch.arange(10) -1
+        key_too_high = torch.arange(10) + 1
+
+        #Run tests
+
+        print("Test error contents")
+        successful_test(good_key_a)
+        successful_test(good_key_b)
+
+        failure_test(bad_type, False)
+        failure_test(bad_dtype)
+        failure_test(key_too_low)
+        failure_test(key_too_high)
+
+    def test_validate_key_active(self):
+        """Test that we can successfully see when a key is active"""
+
+        shape = [10, 10, 10]
+        mode = "id"
+        reservoir = 10
+        layer = Core.DynamicKernelReservoir(shape, reservoir, mode)
+        layer._active[torch.arange(5)] = True
+
+        def successful_test(key: torch.Tensor):
+
+            #Standard
+
+            layer._validate_key_active("Testing", "Doing testing", key)
+
+            #torchscript
+            func = torch.jit.script_method(layer._validate_raw_key)
+
+        def failure_test(key: torch.Tensor):
+
+            #Standard
+
+            try:
+                layer._validate_key_active("Testing", "Doing testing", key)
+                raise RuntimeError("Did not throw")
+            except Core.ReservoirKeyError as err:
+                pass
+
+        #Define cases
+
+        good_key_a = torch.arange(2)
+        good_key_b = torch.arange(5)
+        good_key_c = torch.randint(0, 5, [10, 10])
+
+        bad_key_mix = torch.arange(6)
+        bad_key_many=  torch.randint(0, 10, [10, 10])
+        bad_excludively = torch.randint(5, 10, [10])
+
+        #Run tests
+
+        successful_test(good_key_a)
+        successful_test(good_key_b)
+        successful_test(good_key_c)
+
+        failure_test(bad_key_mix)
+        failure_test(bad_key_many)
+        failure_test(bad_excludively)
+
+    def test_validate_key_inactive(self):
+        """Test that we can validate when a key is inactive. Test vi"""
+
+        shape = [10, 10, 10]
+        mode = "id"
+        reservoir = 10
+        layer = Core.DynamicKernelReservoir(shape, reservoir, mode)
+        layer._active[torch.arange(5)] = True
+
+        def successful_test(key: torch.Tensor):
+
+            #Standard
+
+            layer._validate_key_inactive("Testing", "Doing testing", key)
+
+            #torchscript
+            func = torch.jit.script_method(layer._validate_raw_key)
+
+        def failure_test(key: torch.Tensor):
+
+            #Standard
+
+            try:
+                layer._validate_key_inactive("Testing", "Doing testing", key)
+                raise RuntimeError("Did not throw")
+            except Core.ReservoirKeyError as err:
+                pass
+
+        #Define cases
+
+        good_key_a = torch.arange(5, 10)
+        good_key_b = torch.arange(7, 10)
+        good_key_c = torch.randint(5, 10, [10, 10])
+
+        bad_key_mix = torch.arange(10)
+        bad_key_complex_mix = torch.randint(0, 10, [10, 10, 10])
+        bad_exclusively = torch.randint(0, 5, [10, 10])
+        #Run tests
+
+        successful_test(good_key_a)
+        successful_test(good_key_b)
+        successful_test(good_key_c)
+
+        failure_test(bad_key_mix)
+        failure_test(bad_key_complex_mix)
+        failure_test(bad_exclusively)
+
+    def test_validate_kernel(self):
+        """Test that the validate kernel mechanism is sane"""
+
+        shape = [10, 10, 10]
+        mode = "id"
+        reservoir = 10
+        layer = Core.DynamicKernelReservoir(shape, reservoir, mode)
+        layer._active[torch.arange(5)] = True
+
+        def test_successful(kernel: torch.Tensor):
+
+            layer._validate_kernel("Testing", kernel)
+
+        def test_failure(kernel: torch.Tensor):
+
+            try:
+                layer._validate_kernel("Testing", kernel)
+                raise RuntimeError("Did not throw")
+            except Core.ReservoirKernelError as err:
+                print(err)
+
+        #Define cases
+
+        kernel_valid = torch.randn([5, 10, 10, 10])
+
+        wrong_type = "illegal"
+        wrong_shape = torch.randn([5, 3, 3, 10])
+        wrong_dtype = torch.arange(5000).reshape(5, 10, 10, 10)
+
+        #Run some tests
+
+        test_successful(kernel_valid)
+        test_failure(wrong_type)
+        test_failure(wrong_shape)
+        test_failure(wrong_dtype)
 
 class testLinear(unittest.TestCase):
     """
@@ -372,9 +712,6 @@ class testLinear(unittest.TestCase):
         print(output)
 
         self.assertTrue(new_output != output)
-
-
-
 
 class test_ViewPoint(unittest.TestCase):
     """
