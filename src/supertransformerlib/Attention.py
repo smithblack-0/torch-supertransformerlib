@@ -3,8 +3,10 @@ from typing import Optional, List, Union, Tuple
 import torch
 from torch import nn
 
+import src.supertransformerlib.Basics
 from . import Glimpses
 from . import Core
+from . import Basics
 
 
 def _dot_product_attention(
@@ -42,8 +44,8 @@ class _FeedForward_Forward:
     loaded. Works with main layer FeedForward
     """
     def __init__(self,
-                 ff1: Core.Linear.ForwardType,
-                 ff2: Core.Linear.ForwardType,
+                 ff1: Basics.Linear.ForwardType,
+                 ff2: Basics.Linear.ForwardType,
                  ):
 
         self.ff1 = ff1
@@ -111,17 +113,17 @@ class FeedForward(nn.Module):
         # Setup a few flags
 
         if parallelization is None:
-            self.ff1 = Core.Linear(d_model, d_internal, parallel=parallelization)
+            self.ff1 = src.supertransformerlib.Basics.Linear(d_model, d_internal, parallel=parallelization)
             self.activation = nn.ReLU()
-            self.ff2 = Core.Linear(d_internal, d_model, parallel=parallelization)
+            self.ff2 = src.supertransformerlib.Basics.Linear(d_internal, d_model, parallel=parallelization)
         else:
-            self.ff1 = Core.Linear(d_model, d_internal,
-                                   parallel=parallelization,
-                                   )
+            self.ff1 = src.supertransformerlib.Basics.Linear(d_model, d_internal,
+                                                             parallel=parallelization,
+                                                             )
             self.activation = nn.ReLU()
-            self.ff2 = Core.Linear(d_internal, d_model,
-                                   parallel=parallelization,
-                                   )
+            self.ff2 = src.supertransformerlib.Basics.Linear(d_internal, d_model,
+                                                             parallel=parallelization,
+                                                             )
     def setup_forward(self)->_FeedForward_Forward:
         """
         Sets up a callable function which will execute feedforward using
@@ -149,10 +151,10 @@ class _MultiHeadedAttention_Forward:
     Works with the master class.
     """
     def __init__(self,
-                 query_projector: Core.Linear.ForwardType,
-                 key_projector: Core.Linear.ForwardType,
-                 value_projector: Core.Linear.ForwardType,
-                 collapse_projector: Core.Linear.ForwardType
+                 query_projector: Basics.Linear.ForwardType,
+                 key_projector: Basics.Linear.ForwardType,
+                 value_projector: Basics.Linear.ForwardType,
+                 collapse_projector: Basics.Linear.ForwardType
                  ):
         self.query_projector = query_projector
         self.key_projector = key_projector
@@ -203,7 +205,7 @@ class _MultiHeadedAttention_Forward:
         return output
 
 
-class MultiHeadedAttention(nn.Module, Core.Utility):
+class MultiHeadedAttention(nn.Module):
     """
     A Multiheaded Attention layer capable of
     executing parallization alongside ensemble configured
@@ -249,10 +251,10 @@ class MultiHeadedAttention(nn.Module, Core.Utility):
         assert d_query % heads == 0
         head_width = d_query // heads
 
-        self.query_projector = Core.Linear(d_query, [heads, head_width], parallel=parallelization)
-        self.key_projector = Core.Linear(d_content, [heads, head_width], parallel=parallelization)
-        self.value_projector = Core.Linear(d_content, [heads, head_width], parallel=parallelization)
-        self.collapse_projector = Core.Linear([heads, head_width], d_output, parallel=parallelization)
+        self.query_projector = src.supertransformerlib.Basics.Linear(d_query, [heads, head_width], parallel=parallelization)
+        self.key_projector = src.supertransformerlib.Basics.Linear(d_content, [heads, head_width], parallel=parallelization)
+        self.value_projector = src.supertransformerlib.Basics.Linear(d_content, [heads, head_width], parallel=parallelization)
+        self.collapse_projector = src.supertransformerlib.Basics.Linear([heads, head_width], d_output, parallel=parallelization)
 
     def setup_forward(self)->_MultiHeadedAttention_Forward:
         """
@@ -292,10 +294,10 @@ class _PIMU_Forward:
     The forward call function for the pimu process
     """
     def __init__(self,
-                 query_projector: Core.Linear.ForwardType,
+                 query_projector: Basics.Linear.ForwardType,
                  key: nn.Parameter,
                  value: nn.Parameter,
-                 dehead_projector: Core.Linear.ForwardType,
+                 dehead_projector: Basics.Linear.ForwardType,
                  ):
 
         self.QueryProj = query_projector
@@ -329,7 +331,7 @@ class _PIMU_Forward:
         return output
 
 
-class PIMU(nn.Module, Core.Utility):
+class PIMU(nn.Module):
     """
     Parameter Injection Memory Unit. (PIMU)
 
@@ -391,10 +393,10 @@ class PIMU(nn.Module, Core.Utility):
         nn.init.kaiming_uniform_(key)
         nn.init.kaiming_uniform_(value)
 
-        self.QueryProj = Core.Linear(d_model, [heads, head_channel_width], parallelization)
+        self.QueryProj = src.supertransformerlib.Basics.Linear(d_model, [heads, head_channel_width], parallelization)
         self.Key = nn.Parameter(key)
         self.Value = nn.Parameter(value)
-        self.DeheadProj = Core.Linear([heads, head_channel_width], d_model, parallelization)
+        self.DeheadProj = src.supertransformerlib.Basics.Linear([heads, head_channel_width], d_model, parallelization)
     def setup_forward(self)->_PIMU_Forward:
         """
         Set up a passable, callable, forward function that
@@ -424,9 +426,9 @@ class _PISU_Forward:
     """
     def __init__(self,
                  query: nn.Parameter,
-                 key_projector: Core.Linear.ForwardType,
-                 value_projector: Core.Linear.ForwardType,
-                 dehead_projector: Core.Linear.ForwardType
+                 key_projector: Basics.Linear.ForwardType,
+                 value_projector: Basics.Linear.ForwardType,
+                 dehead_projector: Basics.Linear.ForwardType
                  ):
 
         self.query = query
@@ -464,7 +466,7 @@ class _PISU_Forward:
         return output
 
 
-class PISU(nn.Module, Core.Utility):
+class PISU(nn.Module):
     """
     Parameter Injected Summary Unit (PISU)
 
@@ -511,9 +513,9 @@ class PISU(nn.Module, Core.Utility):
         query = nn.Parameter(query)
 
         self.query = query
-        self.key_projector = Core.Linear(d_model, [heads, head_width], parallelization)
-        self.value_projector = Core.Linear(d_model, [heads, head_width], parallelization)
-        self.dehead = Core.Linear([heads, head_width], d_output, parallelization)
+        self.key_projector = src.supertransformerlib.Basics.Linear(d_model, [heads, head_width], parallelization)
+        self.value_projector = src.supertransformerlib.Basics.Linear(d_model, [heads, head_width], parallelization)
+        self.dehead = src.supertransformerlib.Basics.Linear([heads, head_width], d_output, parallelization)
 
     def setup_forward(self) -> _PISU_Forward:
         """Setup a callable forward function"""
@@ -534,7 +536,7 @@ class PISU(nn.Module, Core.Utility):
 
 
 
-class LCSA(nn.Module, Core.Utility):
+class LCSA(nn.Module):
     """
     Local Context Self Attention (LCSA)
 
@@ -590,10 +592,10 @@ class LCSA(nn.Module, Core.Utility):
             parallelization = self.standardize_input(parallelization)
             parallel_shape = torch.concat([parallelization, parallel_shape], dim=0)
 
-        self.query_projector = Core.Linear(d_model, head_width, parallel_shape)
-        self.key_projector = Core.Linear(d_model, head_width, parallel_shape)
-        self.value_projector = Core.Linear(d_model, head_width, parallel_shape)
-        self.dehead = Core.Linear([heads, head_width], d_model, parallelization)
+        self.query_projector = src.supertransformerlib.Basics.Linear(d_model, head_width, parallel_shape)
+        self.key_projector = src.supertransformerlib.Basics.Linear(d_model, head_width, parallel_shape)
+        self.value_projector = src.supertransformerlib.Basics.Linear(d_model, head_width, parallel_shape)
+        self.dehead = src.supertransformerlib.Basics.Linear([heads, head_width], d_model, parallelization)
 
     def forward(self, tensor: torch.Tensor) -> torch.Tensor:
         """

@@ -34,86 +34,115 @@ class GlimpseException(Exception):
             msg += "This occurred while doing tasks: \n\n%s" % tasks
         super().__init__(msg)
 
+class ReshapeException(Core.ValidationError):
+    """
+    A error type for when reshape fails
+    """
+    def __init__(self, reason: str, tasks: Optional[List[str]] = None):
+        error_message_type = "ReshapeException"
+        super().__init__(error_message_type, reason, tasks)
+
+class _ReshapeStatic:
+    """
+    Helper functions for reshape. Cannot use
+    static method due to torchscript
+    """
+
+
+@torch.jit.script
 class Reshape:
     """
     A class capable of perfoming an inferred reshape on a tensor in
     either functional or constructed format.
     """
+    exceptionType = "ReshapeException"
 
-    @classmethod
-    def validate_reshape(cls,
+    def validate_reshape(self,
                          tensor: torch.Tensor,
                          input_shape: torch.Tensor,
                          output_shape: torch.Tensor,
                          tasks: Optional[List[str]] = None
                          ):
-        if tasks is not None:
-            tasks = tasks.copy()
-
-        tasks.append("Validating reshape")
-        errortype = "ReshapeError"
 
         #Verify the number of tensor dimensions is large enough to encapsulate
         #the input shape and output shape
-
+        tasks = Core.update_or_start_tasks("Validating Reshape", tasks)
         if input_shape.dim() > 1:
-            reason = "Param 'input_shape' should be a 1d tensor. It is instead %s-D" % input_shape.dim()
-            raise GlimpseException(errortype, reason, tasks)
+            input_dims = input_shape.dim()
+            reason = f"""\
+            Parameter 'input_shape' should be a 1d tensor.
+            It is instead a {input_dims}D tensor.
+            This is not allowed
+            """
+            reason = Core.dedent(reason)
+            raise ReshapeException(reason, tasks)
 
         if output_shape.dim() > 1:
-            reason = "Param 'output_shape' should be a 1d tensor. It is instead %s-D" % output_shape.dim()
-            raise GlimpseException(errortype, reason, tasks)
+            output_dims = output_shape.dim()
+            reason = f"""\
+            Parameter 'input_shape' should be a 1d tensor.
+            It is instead a {output_dims}D tensor.
+            This is not allowed
+            """
+            reason = Core.dedent(reason)
+            raise ReshapeException(reason, tasks)
 
         if tensor.dim() - input_shape.shape[0] < 0:
-            reason = """\
+            tensor_dim = tensor.dim()
+            input_dim = input_shape.shape[0]
+            reason = f"""\
             Rank of tensor parameter insufficient for resize:
-                Param 'tensor' has rank {tensor_dim}. 
-                However, Param 'input_shape' is {input_dim} units long.
+            Param 'tensor' has rank {tensor_dim}. 
+            However, Param 'input_shape' is {input_dim} units long.
             """
-            reason = textwrap.dedent(reason)
-            reason = reason.format(tensor_dim = tensor.dim(),
-                                   input_dim = input_shape.size[0])
-
-            raise GlimpseException(errortype, reason, tasks)
+            reason = Core.dedent(reason)
+            raise ReshapeException(reason, tasks)
 
         #Verify that the input_shape matches the tensor shape on
         #the broadcast dimensions
 
         input_shape_length = input_shape.shape[0]
         if tensor.shape[-input_shape_length:] != torch.Size(input_shape):
-            reason = """\
+            temp_input_shape = torch.Size(input_shape)
+            tensor_shape = tensor.shape
+            reason = f"""\
             Param 'tensor' shape and param 'input_shape' shape do not match:
                 The param 'tensor' has shape {tensor_shape}.
-                This cannot be broadcast with {input_shape}.
+                This cannot be broadcast with {temp_input_shape}.
             """
-            reason = textwrap.dedent(reason)
-            reason = reason.format(tensor_shape = tensor.shape,
-                                   input_shape = torch.Size(input_shape))
-            raise GlimpseException(errortype, reason, tasks)
+            reason = Core.dedent(reason)
+            raise ReshapeException(reason, tasks)
 
         if input_shape.prod() != output_shape.prod():
-            reason = """\
+            temp_input_shape = torch.Size(input_shape)
+            temp_output_shape = torch.Size(output_shape)
+            input_shape_elements = int(input_shape.prod())
+            output_shape_elements = int(output_shape.prod())
+            reason = f"""\
             Reshape is impossible with unequal number of elements.
-                The number of elements for 'input_shape' shaped as {input_shape} is {input_elements}
-                However, the number of elements for 'output_shape' shaped as {output_shape} is {output_elements}
+                The number of elements for 'input_shape' shaped as {temp_input_shape} is {input_shape_elements}
+                However, the number of elements for 'output_shape' shaped as {temp_output_shape} is {output_shape_elements}
                 These do not match.
             
             """
-            reason = textwrap.dedent(reason)
-            reason = reason.format(
-                input_shape = torch.Size(input_shape),
-                input_elements = int(input_shape.prod()),
-                output_shape = torch.Size(output_shape),
-                output_elements = int(output_shape.prod())
-            )
-            raise GlimpseException(errortype, reason, tasks)
+            reason = Core.dedent(reason)
+            raise ReshapeException(reason, tasks)
 
-    @classmethod
-    def reshape(cls,
+    def generate_missing_param_message(self, parameter: str):
+        missing_parameter_message = f"""\
+        Neither Reshape '__call__' nor Reshape '__init__' include a definition for 
+        parameter '{parameter}'. This parameter is required. Either call with 
+        a definition for '{parameter}' or run constructor with a default for
+        '{parameter}'
+        """
+        missing_parameter_message = Core.dedent(missing_parameter_message)
+        return missing_parameter_message
+
+    def reshape(self,
                 tensor: torch.Tensor,
-                input_shape: Union[torch.Tensor, List[int], int],
-                output_shape:  Union[torch.Tensor, List[int], int],
-                validate: Optional[bool] = True,
+                input_shape: Core.StandardShapeType,
+                output_shape: Core.StandardShapeType,
+                validate: bool,
                 tasks: Optional[List[str]] = None,
                 )->torch.Tensor:
         """
@@ -129,40 +158,81 @@ class Reshape:
         """
 
 
-        input_shape = Core.standardize_input(input_shape)
-        output_shape = Core.standardize_input(output_shape)
-
-        if validate:
-            taskupdate = "Running reshape function"
-            if tasks is None:
-                tasks = [taskupdate]
-            else:
-                tasks = tasks.copy()
-                tasks.append(taskupdate)
-
-            cls.validate_reshape(tensor, input_shape, output_shape, tasks)
-
-        broadcast_length = input_shape.shape[0]
-        static_shape = tensor.shape[:-broadcast_length]
-        final_shape = torch.concat([static_shape, output_shape])
-        final_size = torch.Size(final_shape)
-        return tensor.reshape(final_size)
-
+        """        input_shape = Core.standardize_shape(input_shape, "input_shape")
+                output_shape = Core.standardize_shape(output_shape, "output_shape")
+        
+                if validate:
+                    validation_task = Core.update_or_start_tasks("validating", tasks)
+                    self.validate_reshape(tensor, input_shape, output_shape, validation_task)
+        
+        
+        
+                broadcast_length = input_shape.shape[0]
+                static_shape = torch.tensor(tensor.shape[:-broadcast_length], dtype=torch.int64)
+                final_shape = torch.concat([static_shape, output_shape])
+                final_size = torch.Size(final_shape)"""
+        return torch.reshape(tensor, [5])
 
     def __init__(self,
-
-
+                input_shape: Optional[Core.StandardShapeType] = None,
+                output_shape: Optional[Core.StandardShapeType] = None,
+                validate: bool = True,
+                tasks: Optional[str] = None
                  ):
-        pass
+        """
+        One can provide a variety of defaults here.
+        Doing so will cause an unfilled call to automatically
+        substitute these defaults.
+        """
+
+
+        self.input_shape = input_shape
+        self.output_shape = output_shape
+        self.validate = validate
+        self.tasks = tasks
 
     def __call__(self,
-                 tensor: torch.Tensor,
-                input_shape: Union[torch.Tensor, List[int], int],
-                output_shape:  Union[torch.Tensor, List[int], int],
-                validate: Optional[bool] = True,
+                tensor: torch.Tensor,
+                input_shape: Optional[Core.StandardShapeType] = None,
+                output_shape:  Optional[Core.StandardShapeType] = None,
+                validate: bool = True,
                 tasks: Optional[List[str]] = None,
+                     )->torch.Tensor:
+
+        task = "Run reshape possibly with defaults"
+        tasks = Core.update_or_start_tasks(task, tasks)
+
+        if input_shape is None:
+            input_shape = self.input_shape
+        if input_shape is None:
+            reason = self.generate_missing_param_message("input_shape")
+            raise ReshapeException(reason, tasks)
+        input_shape = Core.standardize_shape(input_shape, "input_shape", tasks=tasks)
+
+        if output_shape is None:
+            output_shape = self.output_shape
+        if output_shape is None:
+            reason = self.generate_missing_param_message("output_shape")
+            raise ReshapeException(reason, tasks)
+        output_shape = Core.standardize_shape(output_shape, "output_shape", tasks=tasks)
 
 
+
+        #handle validation
+        if validate is None:
+            if self.validate is None:
+                reason = self.generate_missing_param_message("validate")
+                raise ReshapeException(reason, tasks)
+            else:
+                validate = self.validate
+
+        return self.reshape(
+            tensor,
+            input_shape,
+            output_shape,
+            validate,
+            tasks
+        )
 
 def view(tensor,
          input_shape: Union[torch.Tensor, List[int], int],

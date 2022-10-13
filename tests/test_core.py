@@ -1,3 +1,4 @@
+import textwrap
 import unittest
 from typing import Type
 
@@ -5,6 +6,8 @@ import torch
 from torch import nn
 import torch.nn
 import itertools
+
+import src.supertransformerlib.Basics
 import src.supertransformerlib.Core
 import src.supertransformerlib.Core as Core
 
@@ -15,18 +18,122 @@ import src.supertransformerlib.Core as Core
 # is happy
 
 class test_functions(unittest.TestCase):
+    def test_dedent(self):
+        """
+        Test dedent, which is used for generating
+        error messages. It must be torchscript compatible
+        """
+
+        message = """\
+        This is a test
+        
+        It has extra space due to being defined inline. 
+        These need to be removed by dedent.
+        """
+
+        expected = textwrap.dedent(message)
+        gotten = Core.dedent(message)
+        equivalent = expected == gotten
+        self.assertTrue(equivalent, "textwrap dedent and torchscript dedent did not match.")
+
+    def test_format(self):
+        """
+        Test that the torchscript formatting method works as required
+        """
+        replace = "potato"
+        replace2 = "item"
+        string_to_format = "  blah blah {replace} blah {replace2}   "
+
+        expected = string_to_format.format(
+            replace = replace,
+            replace2 = replace2
+        )
+        received = Core.format(string_to_format,
+                               {
+                                   "replace" : replace,
+                                   "replace2" : replace2
+                               }
+                               )
+        self.assertTrue(expected == received)
+
     def test_standardize(self):
         """
         Test the ability of the standardize function to perform standardization.
         """
+        print_error_messages = False
+        tasks = ["Testing"]
 
-        case_one = 5
-        case_two = [4, 5]
-        case_three = torch.tensor([5, 6, 7])
+        def test_should_succeed(input,
+                                name,
+                                allow_negatives,
+                                allow_zeros,
+                                tasks,
+                                expected_result):
 
-        Core.standardize_input(case_one)
-        Core.standardize_input(case_two)
-        Core.standardize_input(case_three)
+            #Standard
+            output = Core.standardize_shape(input,
+                                            name,
+                                            allow_negatives,
+                                            allow_zeros,
+                                            tasks,
+                                            )
+            self.assertTrue(torch.all(output == expected_result))
+
+            #Torchscript
+            func = torch.jit.script(Core.standardize_shape)
+            output =func(input,
+                                            name,
+                                            allow_negatives,
+                                            allow_zeros,
+                                            tasks,
+                                            )
+            self.assertTrue(torch.all(output == expected_result))
+
+        def test_should_fail(input,
+                             name,
+                             allow_negatives,
+                             allow_zeros,
+                             tasks):
+
+            try:
+                func = torch.jit.script(Core.standardize_shape)
+                output = func(input,
+                              name,
+                              allow_negatives,
+                              allow_zeros,
+                              tasks,
+                              )
+                raise RuntimeError("No error thrown")
+            except torch.jit.Error as err:
+                if print_error_messages:
+                    print(err)
+
+        #Define test cases
+
+        basic_int = (1, "basic", False, False, tasks, torch.tensor([1]))
+        basic_list = ([1, 2], "list", False, False, tasks, torch.tensor([1, 2]))
+        basic_tensor = (torch.tensor([1, 2, 3]), "tensor", False, False, tasks, torch.tensor([1, 2, 3]))
+        allow_negatives = (-1, "basic", True, True, tasks, torch.tensor([-1]))
+        allow_zeros = (0, "zeros", False, True, tasks, torch.tensor([0]))
+
+        input_less_than_zero = ([-1, 2], "bad_domain", False, False, tasks)
+        input_equal_to_zero = ([0, 1, 2], "bad_domain", False, False, tasks)
+        input_floating = (torch.tensor([0.2]), "bad_type", False, False, tasks)
+        input_complex = (torch.tensor([0], dtype = torch.complex64), "bad_type", False, False, tasks)
+
+        #Run tests
+        test_should_succeed(*basic_int)
+        test_should_succeed(*basic_list)
+        test_should_succeed(*basic_tensor)
+        test_should_succeed(*allow_negatives)
+        test_should_succeed(*allow_zeros)
+
+        test_should_fail(*input_less_than_zero)
+        test_should_fail(*input_equal_to_zero)
+        test_should_fail(*input_floating)
+        test_should_fail(*input_complex)
+
+
     def test_validate_shape(self):
         """
         Test the ability of validate shape to correctly
@@ -570,7 +677,7 @@ class testLinear(unittest.TestCase):
         """ Tests if the standard pytorch linear layer behavior is reproduced"""
 
         tensor = torch.rand([2, 5])
-        tester = src.supertransformerlib.Core.Linear(5, 10)
+        tester = src.supertransformerlib.Basics.Linear(5, 10)
         tester = torch.jit.script(tester)
         test = tester(tensor)
         self.assertTrue(test.shape == torch.Size([2, 10]), "Regular pytorch layer not reproduced")
@@ -581,9 +688,9 @@ class testLinear(unittest.TestCase):
         tensor = torch.rand([30, 20, 15])
 
         # Define test layers
-        test_expansion = src.supertransformerlib.Core.Linear(15, [5, 3])
-        test_collapse = src.supertransformerlib.Core.Linear([20, 15], 300)
-        test_both = src.supertransformerlib.Core.Linear([20, 15], [10, 30])
+        test_expansion = src.supertransformerlib.Basics.Linear(15, [5, 3])
+        test_collapse = src.supertransformerlib.Basics.Linear([20, 15], 300)
+        test_both = src.supertransformerlib.Basics.Linear([20, 15], [10, 30])
 
         # Perform tests
 
@@ -607,8 +714,8 @@ class testLinear(unittest.TestCase):
 
         # Create test layers
 
-        test_single = src.supertransformerlib.Core.Linear(10, 20, 20)
-        test_multiple = src.supertransformerlib.Core.Linear(10, 20, [30, 20])
+        test_single = src.supertransformerlib.Basics.Linear(10, 20, 20)
+        test_multiple = src.supertransformerlib.Basics.Linear(10, 20, [30, 20])
 
         # Run tests
 
@@ -624,7 +731,7 @@ class testLinear(unittest.TestCase):
 
         # create tester
 
-        test_head_independence = src.supertransformerlib.Core.Linear(20, 20, 2)
+        test_head_independence = src.supertransformerlib.Basics.Linear(20, 20, 2)
 
         # Run tests
 
@@ -640,7 +747,7 @@ class testLinear(unittest.TestCase):
         test_tensor = torch.randn([20, 10])
 
         # Develop test layer
-        test_grad = src.supertransformerlib.Core.Linear([20, 10], 1)
+        test_grad = src.supertransformerlib.Basics.Linear([20, 10], 1)
 
         # Develop optim
         test_optim = torch.optim.SGD(test_grad.parameters(), lr=0.01)
@@ -655,7 +762,7 @@ class testLinear(unittest.TestCase):
         """ Test whether or not the module is scriptable when instanced"""
         # Develop test layer
         test_tensor = torch.randn([30, 20, 20])
-        test_script = src.supertransformerlib.Core.Linear(20, 10, 1)
+        test_script = src.supertransformerlib.Basics.Linear(20, 10, 1)
 
         # Perform test
         scripted = torch.jit.script(test_script)
@@ -664,7 +771,7 @@ class testLinear(unittest.TestCase):
     def test_dynamics(self):
         """Test whether or not dynamic assignment works."""
         test_tensor = torch.randn([30, 20, 20])
-        test_layer = src.supertransformerlib.Core.Linear([20,20], 10, 30)
+        test_layer = src.supertransformerlib.Basics.Linear([20, 20], 10, 30)
         test_layer = torch.jit.script(test_layer)
         output = test_layer(test_tensor)
         self.assertTrue(output.shape == torch.Size([30, 10]))
@@ -672,11 +779,11 @@ class testLinear(unittest.TestCase):
     def test_passable(self):
         """Test whether or not passing and executing linear later on is possible"""
         test_tensor = torch.randn([30, 20, 20])
-        test_layer = src.supertransformerlib.Core.Linear([20,20], 10, 30)
+        test_layer = src.supertransformerlib.Basics.Linear([20, 20], 10, 30)
         test_layer = torch.jit.script(test_layer)
 
         @torch.jit.script
-        def perform_linear(forward: src.supertransformerlib.Core.Linear.ForwardType, tensor: torch.Tensor):
+        def perform_linear(forward: src.supertransformerlib.Basics.Linear.ForwardType, tensor: torch.Tensor):
             return forward(tensor)
 
         forward = test_layer.setup_forward()
@@ -687,13 +794,13 @@ class testLinear(unittest.TestCase):
         """Test whether or not a passable feature updates on gradient descent"""
 
         test_tensor = torch.randn([30, 20, 20])
-        test_layer = src.supertransformerlib.Core.Linear([20,20], 10, 30)
+        test_layer = src.supertransformerlib.Basics.Linear([20, 20], 10, 30)
         test_optim = torch.optim.SGD(test_layer.parameters(), lr=0.01)
 
         test_layer = torch.jit.script(test_layer)
 
         @torch.jit.script
-        def perform_linear(forward: src.supertransformerlib.Core.Linear.ForwardType, tensor: torch.Tensor):
+        def perform_linear(forward: src.supertransformerlib.Basics.Linear.ForwardType, tensor: torch.Tensor):
             return forward(tensor)
 
 
@@ -804,7 +911,7 @@ class test_ViewPoint(unittest.TestCase):
 
         # Run process
 
-        viewer = src.supertransformerlib.Core.ViewPoint(
+        viewer = src.supertransformerlib.Basics.ViewPoint(
             views=2,
             view_width=3,
             weights=weights,
@@ -819,13 +926,13 @@ class test_ViewpointFactory(unittest.TestCase):
     def test_constructor(self):
         """test that the constructor works at all"""
 
-        src.supertransformerlib.Core.ViewPointFactory(32, 32, 8, 20, 4)
+        src.supertransformerlib.Basics.ViewPointFactory(32, 32, 8, 20, 4)
 
 
     def test_viewpoint_shape(self):
         query_tensor = torch.randn([2, 3, 32])
         text_tensor = torch.randn([2, 10, 32])
-        factory = src.supertransformerlib.Core.ViewPointFactory(32, 32, 8, 5, 4)
+        factory = src.supertransformerlib.Basics.ViewPointFactory(32, 32, 8, 5, 4)
         viewpoint = factory(query_tensor, text_tensor)
         expected_shape = torch.Size([2, 8, 3, 5, 32])
 

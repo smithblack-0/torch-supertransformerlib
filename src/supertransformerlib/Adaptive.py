@@ -10,6 +10,8 @@ from typing import Optional, Union, List
 
 import torch
 from torch import nn
+
+import src.supertransformerlib.Basics
 from . import Core
 
 
@@ -281,23 +283,23 @@ class AdaptiveAttention(nn.Module):
         d_head = d_query // heads
 
         # Attention projectors
-        self.attn_query_projector = Core.Linear(d_query, [heads, d_head], parallelization)
-        self.attn_key_projector = Core.Linear(d_key, [heads, d_head], parallelization)
+        self.attn_query_projector = src.supertransformerlib.Basics.Linear(d_query, [heads, d_head], parallelization)
+        self.attn_key_projector = src.supertransformerlib.Basics.Linear(d_key, [heads, d_head], parallelization)
 
         # Confidence projectors
 
-        self.confidence_query_projector = Core.Linear(d_query, [heads, d_confidence], parallelization)
-        self.confidence_key_projector = Core.Linear(d_key, [heads, d_confidence], parallelization)
+        self.confidence_query_projector = src.supertransformerlib.Basics.Linear(d_query, [heads, d_confidence], parallelization)
+        self.confidence_key_projector = src.supertransformerlib.Basics.Linear(d_key, [heads, d_confidence], parallelization)
 
         # Assembly projectors
 
-        self.assembly_query_projector = Core.Linear(d_query, [heads, d_assembly], parallelization)
-        self.assembly_key_projector = Core.Linear(d_key, [heads, d_assembly], parallelization)
+        self.assembly_query_projector = src.supertransformerlib.Basics.Linear(d_query, [heads, d_assembly], parallelization)
+        self.assembly_key_projector = src.supertransformerlib.Basics.Linear(d_key, [heads, d_assembly], parallelization)
 
         # Value and deheading projectors.
 
-        self.value_projection = Core.Linear(d_value, [heads, d_head], parallelization)
-        self.dehead = Core.Linear([heads, d_head], d_value, parallelization)
+        self.value_projection = src.supertransformerlib.Basics.Linear(d_value, [heads, d_head], parallelization)
+        self.dehead = src.supertransformerlib.Basics.Linear([heads, d_head], d_value, parallelization)
 
     def make_attn_heads(self, query, key, value):
         query = query.unsqueeze(0).transpose(-2, 0).squeeze(-2)  # (item,, (..parallel), embedding)

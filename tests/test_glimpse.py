@@ -4,6 +4,115 @@ import numpy as np
 import torch
 
 from src.supertransformerlib import Glimpses
+from src.supertransformerlib import Core
+print_errors = True
+
+
+class testReshape(unittest.TestCase):
+    """
+    Test whether the reshape mechanism is working sanely
+    """
+
+    def test_constructor(self):
+        Glimpses.Reshape(1, 1)
+
+    def test_prebuild_reshape(self):
+        """
+        Test that prebuilding then executing the reshape
+        raises errors when appropriate and performs a reshape when not
+        """
+
+        def test_should_succeed(tensor: torch.Tensor,
+                                input_shape: Core.StandardShapeType,
+                                output_shape: Core.StandardShapeType,
+                                expected_shape: torch.Size):
+
+            #Standard
+
+            input_shape = Core.standardize_shape(input_shape, "input_shape")
+            output_shape = Core.standardize_shape(output_shape, "output_shape")
+            reshape = Glimpses.Reshape(input_shape, output_shape)
+            output = reshape(tensor)
+            self.assertTrue(output.shape == expected_shape)
+
+            #Torchscript
+
+            input_shape = Core.standardize_shape(input_shape, "input_shape")
+            output_shape = Core.standardize_shape(output_shape, "output_shape")
+            reshape = Glimpses.Reshape(input_shape, output_shape)
+            reshape = torch.jit.script(reshape)
+            output = reshape(tensor)
+            self.assertTrue(output.shape == expected_shape)
+
+
+        #Tests good cases
+
+        good_simple = (torch.randn([5]), 5, 5, torch.Size([5]))
+        good_batched_tensor = (torch.randn([5, 5, 5]), [5, 5], [25], torch.Size([5, 25]))
+        good_tensor_defined = (torch.randn([5, 5, 5]), torch.tensor([5, 5]), torch.tensor([5, 5]), torch.Size([5, 5, 5]))
+
+        #Run cases
+
+        test_should_succeed(*good_simple)
+        test_should_succeed(*good_batched_tensor)
+        test_should_succeed(*good_tensor_defined)
+
+
+    def test_validate_reshape(self):
+        """Test whether validation is operating correctly when used"""
+
+        task = ["Running tests"]
+        reshape = Glimpses.Reshape(1, 1)
+
+        def test_should_success(tensor: torch.Tensor,
+                                input_shape: torch.Tensor,
+                                output_shape: torch.Tensor):
+
+            input_shape = Core.standardize_shape(input_shape, "input_shape")
+            output_shape = Core.standardize_shape(output_shape, "output_shape")
+
+            #Standard
+            reshape.validate_reshape(tensor, input_shape, output_shape)
+
+            #Torchscript
+
+
+            func = torch.jit.script(reshape.validate_reshape)
+            func(tensor, input_shape, output_shape)
+
+        def test_should_fail(tensor: torch.Tensor,
+                             input_shape: torch.Tensor,
+                             output_shape: torch.Tensor):
+
+            try:
+                reshape.validate_reshape(tensor, input_shape, output_shape)
+                raise RuntimeError("No error thrown")
+            except Glimpses.ReshapeException as err:
+                if print_errors:
+                    print(err)
+
+            try:
+                func = torch.jit.script(reshape.validate_reshape)
+                func(tensor, input_shape, output_shape)
+                raise RuntimeError("No error thrown")
+            except torch.jit.script as err:
+                pass
+
+
+        #Tests good cases
+
+        good_simple = (torch.randn([5]), 5, 5)
+        good_batched_tensor = (torch.randn([5, 5, 5]), [5, 5], [25])
+        good_tensor_defined = (torch.randn([5, 5, 5]), torch.tensor([5, 5]), torch.tensor([5, 5]))
+
+        #Run cases
+
+        test_should_success(*good_simple)
+        test_should_success(*good_batched_tensor)
+        test_should_success(*good_tensor_defined)
+
+
+
 
 
 class testView(unittest.TestCase):
