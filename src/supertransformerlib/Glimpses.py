@@ -9,9 +9,160 @@ do something with it. They also tend to return views to allow efficient memory u
 """
 
 import torch
+import textwrap
 from torch import nn
 from torch.nn import functional as F
 from typing import Union, List, Optional
+from . import Core
+
+
+class GlimpseException(Exception):
+    """
+    An error class for glimpse problems
+    """
+    def __init__(self,
+                 type: str,
+                 reason: str,
+                 tasks: Optional[List[str]] = None
+                 ):
+
+        msg = ""
+        msg += "A error occurred: %s \n" % type
+        msg += "The error occurred because: %s\n" %reason
+        if tasks is not None:
+            tasks = "\n".join(tasks)
+            msg += "This occurred while doing tasks: \n\n%s" % tasks
+        super().__init__(msg)
+
+class Reshape:
+    """
+    A class capable of perfoming an inferred reshape on a tensor in
+    either functional or constructed format.
+    """
+
+    @classmethod
+    def validate_reshape(cls,
+                         tensor: torch.Tensor,
+                         input_shape: torch.Tensor,
+                         output_shape: torch.Tensor,
+                         tasks: Optional[List[str]] = None
+                         ):
+        if tasks is not None:
+            tasks = tasks.copy()
+
+        tasks.append("Validating reshape")
+        errortype = "ReshapeError"
+
+        #Verify the number of tensor dimensions is large enough to encapsulate
+        #the input shape and output shape
+
+        if input_shape.dim() > 1:
+            reason = "Param 'input_shape' should be a 1d tensor. It is instead %s-D" % input_shape.dim()
+            raise GlimpseException(errortype, reason, tasks)
+
+        if output_shape.dim() > 1:
+            reason = "Param 'output_shape' should be a 1d tensor. It is instead %s-D" % output_shape.dim()
+            raise GlimpseException(errortype, reason, tasks)
+
+        if tensor.dim() - input_shape.shape[0] < 0:
+            reason = """\
+            Rank of tensor parameter insufficient for resize:
+                Param 'tensor' has rank {tensor_dim}. 
+                However, Param 'input_shape' is {input_dim} units long.
+            """
+            reason = textwrap.dedent(reason)
+            reason = reason.format(tensor_dim = tensor.dim(),
+                                   input_dim = input_shape.size[0])
+
+            raise GlimpseException(errortype, reason, tasks)
+
+        #Verify that the input_shape matches the tensor shape on
+        #the broadcast dimensions
+
+        input_shape_length = input_shape.shape[0]
+        if tensor.shape[-input_shape_length:] != torch.Size(input_shape):
+            reason = """\
+            Param 'tensor' shape and param 'input_shape' shape do not match:
+                The param 'tensor' has shape {tensor_shape}.
+                This cannot be broadcast with {input_shape}.
+            """
+            reason = textwrap.dedent(reason)
+            reason = reason.format(tensor_shape = tensor.shape,
+                                   input_shape = torch.Size(input_shape))
+            raise GlimpseException(errortype, reason, tasks)
+
+        if input_shape.prod() != output_shape.prod():
+            reason = """\
+            Reshape is impossible with unequal number of elements.
+                The number of elements for 'input_shape' shaped as {input_shape} is {input_elements}
+                However, the number of elements for 'output_shape' shaped as {output_shape} is {output_elements}
+                These do not match.
+            
+            """
+            reason = textwrap.dedent(reason)
+            reason = reason.format(
+                input_shape = torch.Size(input_shape),
+                input_elements = int(input_shape.prod()),
+                output_shape = torch.Size(output_shape),
+                output_elements = int(output_shape.prod())
+            )
+            raise GlimpseException(errortype, reason, tasks)
+
+    @classmethod
+    def reshape(cls,
+                tensor: torch.Tensor,
+                input_shape: Union[torch.Tensor, List[int], int],
+                output_shape:  Union[torch.Tensor, List[int], int],
+                validate: Optional[bool] = True,
+                tasks: Optional[List[str]] = None,
+                )->torch.Tensor:
+        """
+        Performs validation and then reshape.
+
+        Entirely functional.
+
+        :param tensor: The tensor to reshape
+        :param input_shape: The input shape
+        :param output_shape: The output shape
+        :param validate: Whether or not to validate the action.
+        :return: The reshaped tensor
+        """
+
+
+        input_shape = Core.standardize_input(input_shape)
+        output_shape = Core.standardize_input(output_shape)
+
+        if validate:
+            taskupdate = "Running reshape function"
+            if tasks is None:
+                tasks = [taskupdate]
+            else:
+                tasks = tasks.copy()
+                tasks.append(taskupdate)
+
+            cls.validate_reshape(tensor, input_shape, output_shape, tasks)
+
+        broadcast_length = input_shape.shape[0]
+        static_shape = tensor.shape[:-broadcast_length]
+        final_shape = torch.concat([static_shape, output_shape])
+        final_size = torch.Size(final_shape)
+        return tensor.reshape(final_size)
+
+
+    def __init__(self,
+
+
+                 ):
+        pass
+
+    def __call__(self,
+                 tensor: torch.Tensor,
+                input_shape: Union[torch.Tensor, List[int], int],
+                output_shape:  Union[torch.Tensor, List[int], int],
+                validate: Optional[bool] = True,
+                tasks: Optional[List[str]] = None,
+
+
 
 def view(tensor,
          input_shape: Union[torch.Tensor, List[int], int],
@@ -97,7 +248,10 @@ def _strided_reshape(tensor: torch.Tensor, input_shape: torch.Tensor, output_sha
 @torch.jit.script
 def reshape(tensor,
             input_shape: Union[torch.Tensor, List[int], int],
-            output_shape: Union[torch.Tensor, List[int], int]) -> torch.Tensor:
+            output_shape: Union[torch.Tensor, List[int], int],
+            validation: bool = True,
+            task: Optional[str] = None,
+            ) -> torch.Tensor:
     """
     This will, when passed an input shape and compatible output shape, assume that said shapes
     refer to the later dimensions in a tensor, as in broadcasting, and will perform a reshape from
@@ -114,7 +268,13 @@ def reshape(tensor,
     :param output_shape:
         The expected output shape. This can be a list/tuple of ints, or an int. It should represent the final shape one
         wishes the tensor to take. It also must be the case that the total size of the input and output shape must be the same.
-
+    :param validation:
+        Whether or not to perform validation on the problem before attempting the reshape. Causes
+        some overhead to occur, but gives good error messages.
+    :param task:
+        Used only when validating, and completely optional. Indicates what task
+        was being performed when the error occurred. Included in error messages,
+        essencially just extra details.
     ---- Examples ----
 
 
@@ -155,6 +315,11 @@ def reshape(tensor,
     else:
         output = _strided_reshape(tensor, input_shape, output_shape)
     return output
+
+class reshape_map:
+    """
+    A class which will perform mapping from one
+    """
 
 
 @torch.jit.script
