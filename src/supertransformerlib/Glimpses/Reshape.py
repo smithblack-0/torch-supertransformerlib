@@ -113,6 +113,7 @@ def reshape(tensor: torch.Tensor,
     return torch.reshape(tensor, final_size)
 
 
+@torch.jit.script
 class ReshapeClosure:
     """
     Executes a reshape with the stored closure

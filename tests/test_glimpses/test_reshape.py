@@ -124,9 +124,3 @@ class testClosure(unittest.TestCase):
         closure = Glimpses.ReshapeClosure(**keywords)
         output = closure(tensor, output_shape=[50])
         self.assertTrue(output.shape == torch.Size([10, 50]))
-
-class test_Factory(unittest.TestCase):
-    """
-    Test that the factory method is both
-
-    """

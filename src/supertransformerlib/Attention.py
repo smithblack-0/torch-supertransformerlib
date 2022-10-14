@@ -1,11 +1,10 @@
-from typing import Optional, List, Union, Tuple
+from typing import Optional, List, Union
 
 import torch
 from torch import nn
 
 import src.supertransformerlib.Basics
 from . import Glimpses
-from . import Core
 from . import Basics
 
 
@@ -113,17 +112,17 @@ class FeedForward(nn.Module):
         # Setup a few flags
 
         if parallelization is None:
-            self.ff1 = src.supertransformerlib.Basics.Linear(d_model, d_internal, parallel=parallelization)
+            self.ff1 = src.supertransformerlib.Basics.Basics.Linear(d_model, d_internal, parallel=parallelization)
             self.activation = nn.ReLU()
-            self.ff2 = src.supertransformerlib.Basics.Linear(d_internal, d_model, parallel=parallelization)
+            self.ff2 = src.supertransformerlib.Basics.Basics.Linear(d_internal, d_model, parallel=parallelization)
         else:
-            self.ff1 = src.supertransformerlib.Basics.Linear(d_model, d_internal,
-                                                             parallel=parallelization,
-                                                             )
+            self.ff1 = src.supertransformerlib.Basics.Basics.Linear(d_model, d_internal,
+                                                                    parallel=parallelization,
+                                                                    )
             self.activation = nn.ReLU()
-            self.ff2 = src.supertransformerlib.Basics.Linear(d_internal, d_model,
-                                                             parallel=parallelization,
-                                                             )
+            self.ff2 = src.supertransformerlib.Basics.Basics.Linear(d_internal, d_model,
+                                                                    parallel=parallelization,
+                                                                    )
     def setup_forward(self)->_FeedForward_Forward:
         """
         Sets up a callable function which will execute feedforward using
@@ -251,10 +250,10 @@ class MultiHeadedAttention(nn.Module):
         assert d_query % heads == 0
         head_width = d_query // heads
 
-        self.query_projector = src.supertransformerlib.Basics.Linear(d_query, [heads, head_width], parallel=parallelization)
-        self.key_projector = src.supertransformerlib.Basics.Linear(d_content, [heads, head_width], parallel=parallelization)
-        self.value_projector = src.supertransformerlib.Basics.Linear(d_content, [heads, head_width], parallel=parallelization)
-        self.collapse_projector = src.supertransformerlib.Basics.Linear([heads, head_width], d_output, parallel=parallelization)
+        self.query_projector = src.supertransformerlib.Basics.Basics.Linear(d_query, [heads, head_width], parallel=parallelization)
+        self.key_projector = src.supertransformerlib.Basics.Basics.Linear(d_content, [heads, head_width], parallel=parallelization)
+        self.value_projector = src.supertransformerlib.Basics.Basics.Linear(d_content, [heads, head_width], parallel=parallelization)
+        self.collapse_projector = src.supertransformerlib.Basics.Basics.Linear([heads, head_width], d_output, parallel=parallelization)
 
     def setup_forward(self)->_MultiHeadedAttention_Forward:
         """
@@ -393,10 +392,10 @@ class PIMU(nn.Module):
         nn.init.kaiming_uniform_(key)
         nn.init.kaiming_uniform_(value)
 
-        self.QueryProj = src.supertransformerlib.Basics.Linear(d_model, [heads, head_channel_width], parallelization)
+        self.QueryProj = src.supertransformerlib.Basics.Basics.Linear(d_model, [heads, head_channel_width], parallelization)
         self.Key = nn.Parameter(key)
         self.Value = nn.Parameter(value)
-        self.DeheadProj = src.supertransformerlib.Basics.Linear([heads, head_channel_width], d_model, parallelization)
+        self.DeheadProj = src.supertransformerlib.Basics.Basics.Linear([heads, head_channel_width], d_model, parallelization)
     def setup_forward(self)->_PIMU_Forward:
         """
         Set up a passable, callable, forward function that
@@ -513,9 +512,9 @@ class PISU(nn.Module):
         query = nn.Parameter(query)
 
         self.query = query
-        self.key_projector = src.supertransformerlib.Basics.Linear(d_model, [heads, head_width], parallelization)
-        self.value_projector = src.supertransformerlib.Basics.Linear(d_model, [heads, head_width], parallelization)
-        self.dehead = src.supertransformerlib.Basics.Linear([heads, head_width], d_output, parallelization)
+        self.key_projector = src.supertransformerlib.Basics.Basics.Linear(d_model, [heads, head_width], parallelization)
+        self.value_projector = src.supertransformerlib.Basics.Basics.Linear(d_model, [heads, head_width], parallelization)
+        self.dehead = src.supertransformerlib.Basics.Basics.Linear([heads, head_width], d_output, parallelization)
 
     def setup_forward(self) -> _PISU_Forward:
         """Setup a callable forward function"""
@@ -592,10 +591,10 @@ class LCSA(nn.Module):
             parallelization = self.standardize_input(parallelization)
             parallel_shape = torch.concat([parallelization, parallel_shape], dim=0)
 
-        self.query_projector = src.supertransformerlib.Basics.Linear(d_model, head_width, parallel_shape)
-        self.key_projector = src.supertransformerlib.Basics.Linear(d_model, head_width, parallel_shape)
-        self.value_projector = src.supertransformerlib.Basics.Linear(d_model, head_width, parallel_shape)
-        self.dehead = src.supertransformerlib.Basics.Linear([heads, head_width], d_model, parallelization)
+        self.query_projector = src.supertransformerlib.Basics.Basics.Linear(d_model, head_width, parallel_shape)
+        self.key_projector = src.supertransformerlib.Basics.Basics.Linear(d_model, head_width, parallel_shape)
+        self.value_projector = src.supertransformerlib.Basics.Basics.Linear(d_model, head_width, parallel_shape)
+        self.dehead = src.supertransformerlib.Basics.Basics.Linear([heads, head_width], d_model, parallelization)
 
     def forward(self, tensor: torch.Tensor) -> torch.Tensor:
         """
