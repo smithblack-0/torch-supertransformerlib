@@ -39,8 +39,6 @@ class _Linear_Forward:
                 tensor: torch.Tensor,
                 batch_mask: Optional[torch.Tensor] = None,
                 ):
-        input_shape, row_length = self.input_map
-        column_length, output_shape = self.output_map
 
         flattened_input = self.input_map(tensor)
         flattened_input = flattened_input.unsqueeze(-1)
@@ -48,7 +46,7 @@ class _Linear_Forward:
         flattened_output = torch.matmul(self.kernel, flattened_input).squeeze(-1)
         flattened_output = flattened_output + self.bias
 
-        restored_output = self.output_map(tensor)
+        restored_output = self.output_map(flattened_output)
         return restored_output
 
 

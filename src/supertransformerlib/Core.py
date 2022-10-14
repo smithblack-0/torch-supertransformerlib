@@ -4,7 +4,6 @@ The module for the ensemble
 extended linear process.
 
 """
-import textwrap
 from typing import Union, List, Tuple, Optional, Dict
 
 import torch
@@ -18,15 +17,14 @@ class ValidationError(Exception):
     def __init__(self,
                  type: str,
                  reason: str,
-                 tasks: Optional[List[str]] = None
+                 task: Optional[str] = None
                  ):
 
         msg = ""
         msg += "A validation error occurred: %s \n" % type
         msg += "The error occurred because: \n\n %s\n" %reason
-        if tasks is not None:
-            tasks = "\n".join(tasks)
-            msg += "This occurred while doing tasks: \n\n%s" % tasks
+        if task is not None:
+            msg += "This happened while doing: \n %s" % task
         super().__init__(msg)
 
 # String manipulation.
@@ -98,7 +96,7 @@ def update_or_start_tasks(update: str, tasks: Optional[List[str]])->List[str]:
     information on the current task. If there is none, start
     one.
 
-    :param update: Whatever should be included in the tasks
+    :param update: Whatever should be included in the task
     :param tasks: The current task chain. Or none
     :return: The updated task chain
     """
@@ -129,7 +127,7 @@ def standardize_shape(input: StandardShapeType,
                       input_name: str,
                       allow_negatives: bool = False,
                       allow_zeros: bool = False,
-                      tasks: Optional[List[str]] = None,
+                      task: Optional[str] = None,
                       ) -> torch.Tensor:
     """
     Converts a sequence of things representing the shape
@@ -142,10 +140,9 @@ def standardize_shape(input: StandardShapeType,
     :param input_name: The name of the thing being standardized. Used to generate helpful error messages
     :param allow_negatives: Whether negative elements are allowed in the tensor shape
     :param allow_zeros: Whether zero elements are allowed in the tensor shape
-    :param tasks: The task trace, used to make nice error messages.
+    :param task: The task trace, used to make nice error messages.
     :return: A 1D tensor consisting of a valid definition of a tensor's shape.
     """
-    tasks = update_or_start_tasks(f"Standardizing %s" % input_name, tasks)
     #Turn options into tensors
     if isinstance(input, int):
         output = torch.tensor([input], dtype=torch.int64)
@@ -160,7 +157,7 @@ def standardize_shape(input: StandardShapeType,
             shape. Number of dimensions was actually %{dims}
             """
             reason = dedent(reason)
-            raise StandardizationError(reason, tasks)
+            raise StandardizationError(reason, task)
         if torch.is_floating_point(input):
             tensor_type = input.dtype
             reason = f"""\
@@ -168,7 +165,7 @@ def standardize_shape(input: StandardShapeType,
             However, actually a floating point tensor of type {tensor_type} 
             """
             reason = dedent(reason)
-            raise StandardizationError(reason, tasks)
+            raise StandardizationError(reason, task)
         if torch.is_complex(input):
             tensor_type = input.dtype
             reason = f"""\
@@ -176,7 +173,7 @@ def standardize_shape(input: StandardShapeType,
             type. However, actually recieved a complex type of {tensor_type}
             """
             reason = dedent(reason)
-            raise StandardizationError(reason, tasks)
+            raise StandardizationError(reason, task)
         output = input
     else:
         input_type = type(input)
@@ -185,21 +182,21 @@ def standardize_shape(input: StandardShapeType,
         int, List[int], or torch.Tensor. But instead found {input_type}
         """
         reason = dedent(reason)
-        raise StandardizationError(reason, tasks)
+        raise StandardizationError(reason, task)
     if not allow_negatives and torch.any(output < 0):
         reason = f"""\
         Expected parameter '{input_name}' to consist of no elements
         less than zero. This was not satisfied. 
         """
         reason = dedent(reason)
-        raise StandardizationError(reason, tasks)
+        raise StandardizationError(reason, task)
     if not allow_zeros and torch.any(output == 0):
         reason = f"""\
         Expected parameter '{input_name}' to consist of no elements
         equal to zero. This was not satisfied
         """
         reason = dedent(reason)
-        raise StandardizationError(reason, tasks)
+        raise StandardizationError(reason, task)
 
     return output
 

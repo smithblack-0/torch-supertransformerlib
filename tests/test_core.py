@@ -5,10 +5,7 @@ from typing import Type
 import torch
 from torch import nn
 import torch.nn
-import itertools
 
-import src.supertransformerlib.Basics
-import src.supertransformerlib.Core
 import src.supertransformerlib.Core as Core
 
 
@@ -60,14 +57,14 @@ class test_functions(unittest.TestCase):
         """
         Test the ability of the standardize function to perform standardization.
         """
-        print_error_messages = False
-        tasks = ["Testing"]
+        print_error_messages = True
+        task = "Performing Testing"
 
         def test_should_succeed(input,
                                 name,
                                 allow_negatives,
                                 allow_zeros,
-                                tasks,
+                                task,
                                 expected_result):
 
             #Standard
@@ -75,7 +72,7 @@ class test_functions(unittest.TestCase):
                                             name,
                                             allow_negatives,
                                             allow_zeros,
-                                            tasks,
+                                            task,
                                             )
             self.assertTrue(torch.all(output == expected_result))
 
@@ -85,7 +82,7 @@ class test_functions(unittest.TestCase):
                                             name,
                                             allow_negatives,
                                             allow_zeros,
-                                            tasks,
+                                            task,
                                             )
             self.assertTrue(torch.all(output == expected_result))
 
@@ -93,7 +90,7 @@ class test_functions(unittest.TestCase):
                              name,
                              allow_negatives,
                              allow_zeros,
-                             tasks):
+                             task):
 
             try:
                 func = torch.jit.script(Core.standardize_shape)
@@ -101,7 +98,7 @@ class test_functions(unittest.TestCase):
                               name,
                               allow_negatives,
                               allow_zeros,
-                              tasks,
+                              task,
                               )
                 raise RuntimeError("No error thrown")
             except torch.jit.Error as err:
@@ -110,16 +107,16 @@ class test_functions(unittest.TestCase):
 
         #Define test cases
 
-        basic_int = (1, "basic", False, False, tasks, torch.tensor([1]))
-        basic_list = ([1, 2], "list", False, False, tasks, torch.tensor([1, 2]))
-        basic_tensor = (torch.tensor([1, 2, 3]), "tensor", False, False, tasks, torch.tensor([1, 2, 3]))
-        allow_negatives = (-1, "basic", True, True, tasks, torch.tensor([-1]))
-        allow_zeros = (0, "zeros", False, True, tasks, torch.tensor([0]))
+        basic_int = (1, "basic", False, False, task, torch.tensor([1]))
+        basic_list = ([1, 2], "list", False, False, task, torch.tensor([1, 2]))
+        basic_tensor = (torch.tensor([1, 2, 3]), "tensor", False, False, task, torch.tensor([1, 2, 3]))
+        allow_negatives = (-1, "basic", True, True, task, torch.tensor([-1]))
+        allow_zeros = (0, "zeros", False, True, task, torch.tensor([0]))
 
-        input_less_than_zero = ([-1, 2], "bad_domain", False, False, tasks)
-        input_equal_to_zero = ([0, 1, 2], "bad_domain", False, False, tasks)
-        input_floating = (torch.tensor([0.2]), "bad_type", False, False, tasks)
-        input_complex = (torch.tensor([0], dtype = torch.complex64), "bad_type", False, False, tasks)
+        input_less_than_zero = ([-1, 2], "bad_domain", False, False, task)
+        input_equal_to_zero = ([0, 1, 2], "bad_domain", False, False, task)
+        input_floating = (torch.tensor([0.2]), "bad_type", False, False, task)
+        input_complex = (torch.tensor([0], dtype = torch.complex64), "bad_type", False, False, task)
 
         #Run tests
         test_should_succeed(*basic_int)
@@ -187,6 +184,7 @@ class test_functions(unittest.TestCase):
         test_invalid(invalid_shape)
         test_invalid(invalid_dtype)
         test_invalid(invalid_dim)
+
     def test_validate_string_in_options(self):
 
         def test_succeed(string, stringname, options, optionsname):
