@@ -25,8 +25,6 @@ class ReshapeException(Core.ValidationError):
         super().__init__(error_message_type, reason, tasks)
 
 
-def Reshape()
-
 
 class Reshape:
     """
