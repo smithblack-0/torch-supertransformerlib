@@ -1,11 +1,18 @@
 import unittest
+from typing import Type
 
 import numpy as np
 import torch
 
 from src.supertransformerlib import Glimpses
 from src.supertransformerlib import Core
-print_errors = True
+
+
+#Controls whether or not to print error messages
+#
+# Printing them to the console can help debug or validate them
+# It also aids in forming reasonable error messages.
+print_errors = False
 
 
 class testReshape(unittest.TestCase):
@@ -25,104 +32,113 @@ class testReshape(unittest.TestCase):
         def test_should_succeed(tensor: torch.Tensor,
                                 input_shape: Core.StandardShapeType,
                                 output_shape: Core.StandardShapeType,
-                                expected_shape: torch.Size):
+                                expected_shape: torch.Size,
+                                validation = True,
+                                tasks = None):
 
-            #Standard
 
-            input_shape = Core.standardize_shape(input_shape, "input_shape")
-            output_shape = Core.standardize_shape(output_shape, "output_shape")
-            reshape = Glimpses.Reshape(input_shape, output_shape)
+            reshape = Glimpses.Reshape(input_shape, output_shape, validation, tasks)
             output = reshape(tensor)
             self.assertTrue(output.shape == expected_shape)
 
-            #Torchscript
-
-            input_shape = Core.standardize_shape(input_shape, "input_shape")
-            output_shape = Core.standardize_shape(output_shape, "output_shape")
-            reshape = Glimpses.Reshape(input_shape, output_shape)
-            reshape = torch.jit.script(reshape)
-            output = reshape(tensor)
-            self.assertTrue(output.shape == expected_shape)
+        def test_should_fail(tensor: torch.Tensor,
+                                input_shape: Core.StandardShapeType,
+                                output_shape: Core.StandardShapeType,
+                                expected_failure_type: Type[Exception]):
 
 
+            try:
+                reshape = Glimpses.Reshape(input_shape, output_shape)
+                reshape(tensor)
+                raise RuntimeError("Did not throw exception")
+            except torch.jit.Error as err:
+                if print_errors:
+                    print(err)
+            except expected_failure_type as err:
+                if print_errors:
+                    print(err)
         #Tests good cases
 
         good_simple = (torch.randn([5]), 5, 5, torch.Size([5]))
         good_batched_tensor = (torch.randn([5, 5, 5]), [5, 5], [25], torch.Size([5, 25]))
         good_tensor_defined = (torch.randn([5, 5, 5]), torch.tensor([5, 5]), torch.tensor([5, 5]), torch.Size([5, 5, 5]))
+        good_no_validation = (torch.randn([5, 5, 5]), [5, 5], [25], torch.Size([5, 25]), False )
+        good_has_taskstack = (torch.randn([5,5,5]), [5, 5], [5, 5], torch.Size([5, 5, 5]), True, ["Test1", "test2", "test3"])
 
+
+        #Bad cases
+
+        bad_element_num = (torch.randn([5]), 5, 3, Glimpses.ReshapeException)
+        bad_shape = (torch.randn([5]), [-5], [-5], Core.StandardizationError)
+        bad_dim_number = (torch.randn([5]), [3,6], 18, Glimpses.ReshapeException)
         #Run cases
 
         test_should_succeed(*good_simple)
         test_should_succeed(*good_batched_tensor)
         test_should_succeed(*good_tensor_defined)
+        test_should_succeed(*good_no_validation)
+        test_should_succeed(*good_has_taskstack)
+
+        test_should_fail(*bad_shape)
+        test_should_fail(*bad_dim_number)
+        test_should_fail(*bad_element_num)
+
+    def test_filled_in_reshape(self):
+        """Test that reshape still works when we fill in the blanks later"""
+
+        def test_should_succeed(tensor: torch.Tensor,
+                                input_shape: Core.StandardShapeType,
+                                output_shape: Core.StandardShapeType,
+                                expected_shape: torch.Size,
+                                validation = True,
+                                tasks = None):
 
 
-    def test_validate_reshape(self):
-        """Test whether validation is operating correctly when used"""
-
-        task = ["Running tests"]
-        reshape = Glimpses.Reshape(1, 1)
-
-        def test_should_success(tensor: torch.Tensor,
-                                input_shape: torch.Tensor,
-                                output_shape: torch.Tensor):
-
-            input_shape = Core.standardize_shape(input_shape, "input_shape")
-            output_shape = Core.standardize_shape(output_shape, "output_shape")
-
-            #Standard
-            reshape.validate_reshape(tensor, input_shape, output_shape)
-
-            #Torchscript
-
-
-            func = torch.jit.script(reshape.validate_reshape)
-            func(tensor, input_shape, output_shape)
+            reshape = Glimpses.Reshape()
+            output = reshape(tensor, input_shape, output_shape, validation, tasks)
+            self.assertTrue(output.shape == expected_shape)
 
         def test_should_fail(tensor: torch.Tensor,
-                             input_shape: torch.Tensor,
-                             output_shape: torch.Tensor):
+                                input_shape: Core.StandardShapeType,
+                                output_shape: Core.StandardShapeType,
+                                expected_failure_type: Type[Exception]):
+
 
             try:
-                reshape.validate_reshape(tensor, input_shape, output_shape)
-                raise RuntimeError("No error thrown")
-            except Glimpses.ReshapeException as err:
+                reshape = Glimpses.Reshape()
+                reshape(tensor, input_shape, output_shape)
+                raise RuntimeError("Did not throw exception")
+            except torch.jit.Error as err:
                 if print_errors:
                     print(err)
-
-            try:
-                func = torch.jit.script(reshape.validate_reshape)
-                func(tensor, input_shape, output_shape)
-                raise RuntimeError("No error thrown")
-            except torch.jit.script as err:
-                pass
-
-
+            except expected_failure_type as err:
+                if print_errors:
+                    print(err)
         #Tests good cases
 
-        good_simple = (torch.randn([5]), 5, 5)
-        good_batched_tensor = (torch.randn([5, 5, 5]), [5, 5], [25])
-        good_tensor_defined = (torch.randn([5, 5, 5]), torch.tensor([5, 5]), torch.tensor([5, 5]))
+        good_simple = (torch.randn([5]), 5, 5, torch.Size([5]))
+        good_batched_tensor = (torch.randn([5, 5, 5]), [5, 5], [25], torch.Size([5, 25]))
+        good_tensor_defined = (torch.randn([5, 5, 5]), torch.tensor([5, 5]), torch.tensor([5, 5]), torch.Size([5, 5, 5]))
+        good_no_validation = (torch.randn([5, 5, 5]), [5, 5], [25], torch.Size([5, 25]), False )
+        good_has_taskstack = (torch.randn([5,5,5]), [5, 5], [5, 5], torch.Size([5, 5, 5]), True, ["Test1", "test2", "test3"])
 
+
+        #Bad cases
+
+        bad_element_num = (torch.randn([5]), 5, 3, Glimpses.ReshapeException)
+        bad_shape = (torch.randn([5]), [-5], [-5], Core.StandardizationError)
+        bad_dim_number = (torch.randn([5]), [3,6], 18, Glimpses.ReshapeException)
         #Run cases
 
-        test_should_success(*good_simple)
-        test_should_success(*good_batched_tensor)
-        test_should_success(*good_tensor_defined)
+        test_should_succeed(*good_simple)
+        test_should_succeed(*good_batched_tensor)
+        test_should_succeed(*good_tensor_defined)
+        test_should_succeed(*good_no_validation)
+        test_should_succeed(*good_has_taskstack)
 
-
-
-
-
-class testView(unittest.TestCase):
-    def testBasic(self):
-        """ Tests whether view works """
-        test_tensor = torch.randn([20, 30, 10])
-        Glimpses.reshape(test_tensor, 10, [5, 2])
-        Glimpses.reshape(test_tensor, [30, 10], [50, 6])
-        Glimpses.reshape(test_tensor, torch.tensor([30, 10]), torch.tensor([50, 6]))
-        Glimpses.reshape(test_tensor, torch.tensor([30, 10]), torch.tensor([50, 6], dtype=torch.int32))
+        test_should_fail(*bad_shape)
+        test_should_fail(*bad_dim_number)
+        test_should_fail(*bad_element_num)
 
 
 class testLocal(unittest.TestCase):
@@ -153,6 +169,7 @@ class testLocal(unittest.TestCase):
         test = Glimpses.local(tensor, kernel, stride, dilation)
         test = torch.all(test == final)
         self.assertTrue(test, "Logical failure: Kernels not equal")
+
     def testStriding(self):
         """
         Test if a strided kernel, as used in a convolution, works

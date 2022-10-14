@@ -16,24 +16,6 @@ from typing import Union, List, Optional
 from . import Core
 
 
-class GlimpseException(Exception):
-    """
-    An error class for glimpse problems
-    """
-    def __init__(self,
-                 type: str,
-                 reason: str,
-                 tasks: Optional[List[str]] = None
-                 ):
-
-        msg = ""
-        msg += "A error occurred: %s \n" % type
-        msg += "The error occurred because: %s\n" %reason
-        if tasks is not None:
-            tasks = "\n".join(tasks)
-            msg += "This occurred while doing tasks: \n\n%s" % tasks
-        super().__init__(msg)
-
 class ReshapeException(Core.ValidationError):
     """
     A error type for when reshape fails
@@ -42,18 +24,14 @@ class ReshapeException(Core.ValidationError):
         error_message_type = "ReshapeException"
         super().__init__(error_message_type, reason, tasks)
 
-class _ReshapeStatic:
-    """
-    Helper functions for reshape. Cannot use
-    static method due to torchscript
-    """
+
+def Reshape()
 
 
-@torch.jit.script
 class Reshape:
     """
     A class capable of perfoming an inferred reshape on a tensor in
-    either functional or constructed format.
+    either a functional or filled in manner
     """
     exceptionType = "ReshapeException"
 
@@ -66,26 +44,6 @@ class Reshape:
 
         #Verify the number of tensor dimensions is large enough to encapsulate
         #the input shape and output shape
-        tasks = Core.update_or_start_tasks("Validating Reshape", tasks)
-        if input_shape.dim() > 1:
-            input_dims = input_shape.dim()
-            reason = f"""\
-            Parameter 'input_shape' should be a 1d tensor.
-            It is instead a {input_dims}D tensor.
-            This is not allowed
-            """
-            reason = Core.dedent(reason)
-            raise ReshapeException(reason, tasks)
-
-        if output_shape.dim() > 1:
-            output_dims = output_shape.dim()
-            reason = f"""\
-            Parameter 'input_shape' should be a 1d tensor.
-            It is instead a {output_dims}D tensor.
-            This is not allowed
-            """
-            reason = Core.dedent(reason)
-            raise ReshapeException(reason, tasks)
 
         if tensor.dim() - input_shape.shape[0] < 0:
             tensor_dim = tensor.dim()
@@ -158,20 +116,20 @@ class Reshape:
         """
 
 
-        """        input_shape = Core.standardize_shape(input_shape, "input_shape")
-                output_shape = Core.standardize_shape(output_shape, "output_shape")
-        
-                if validate:
-                    validation_task = Core.update_or_start_tasks("validating", tasks)
-                    self.validate_reshape(tensor, input_shape, output_shape, validation_task)
-        
-        
-        
-                broadcast_length = input_shape.shape[0]
-                static_shape = torch.tensor(tensor.shape[:-broadcast_length], dtype=torch.int64)
-                final_shape = torch.concat([static_shape, output_shape])
-                final_size = torch.Size(final_shape)"""
-        return torch.reshape(tensor, [5])
+        input_shape = Core.standardize_shape(input_shape, "input_shape")
+        output_shape = Core.standardize_shape(output_shape, "output_shape")
+
+        if validate:
+            validation_task = Core.update_or_start_tasks("validating", tasks)
+            self.validate_reshape(tensor, input_shape, output_shape, validation_task)
+
+
+
+        broadcast_length = input_shape.shape[0]
+        static_shape = torch.tensor(tensor.shape[:-broadcast_length], dtype=torch.int64)
+        final_shape = torch.concat([static_shape, output_shape])
+        final_size = torch.Size(final_shape)
+        return torch.reshape(tensor, final_size)
 
     def __init__(self,
                 input_shape: Optional[Core.StandardShapeType] = None,
@@ -234,162 +192,14 @@ class Reshape:
             tasks
         )
 
-def view(tensor,
-         input_shape: Union[torch.Tensor, List[int], int],
-         output_shape: Union[torch.Tensor, List[int], int]) -> torch.Tensor:
+
+class ReshapeFactory(nn.Module):
     """
-    This will, when passed an input shape and compatible output shape, assume that said shapes
-    refer to the later dimensions in a tensor, as in broadcasting, and will perform a reshape from
-    input shape to output shape while keeping all other dimensions exactly the same.
-
-
-    ---- parameters ---
-
-    :param tensor:
-        The tensor to be modified.
-    :param input_shape:
-        The expected input shape. This can be a list/tuple of ints, or an int. It should represent the shape at the end
-        of the input tensor's .shape which will be matched in the tensor input
-    :param output_shape:
-        The expected output shape. This can be a list/tuple of ints, or an int. It should represent the final shape one
-        wishes the tensor to take. It also must be the case that the total size of the input and output shape must be the same.
-
-    ---- Examples ----
-
-
-    For tensors of shape:
-
-    a = (5,2), b=(3, 4, 5,2), c=(30, 5,2),
-
-    For input_shape = (5,2), output_shape=10, one has
-
-    f(a, input_shape, output_shape) = shape(10)
-    f(b, input_shape, output_shape) = shape(3, 4, 10)
-    f(c, input_shape, output_shape) = shape(30, 10)
-
-
+    Emits usable reshapes from stored parameters
+    on demand. Saves and loads sanely with regard
+    to the model.
     """
-
-    # Raw Type converison. The goal here is to end up with something solely
-    # in terms of tensors.
-
-    if torch.jit.isinstance(input_shape, int):
-        input_shape = [input_shape]
-    if torch.jit.isinstance(output_shape, int):
-        output_shape = [output_shape]
-
-    if torch.jit.isinstance(input_shape, List[int]):
-        input_shape = torch.tensor(input_shape, dtype=torch.int64)
-    if torch.jit.isinstance(output_shape, List[int]):
-        output_shape = torch.tensor(output_shape, dtype=torch.int64)
-
-    torch.jit.annotate(torch.Tensor, input_shape)
-    torch.jit.annotate(torch.Tensor, output_shape)
-
-    # Basic sanity testing
-    assert input_shape.prod() == output_shape.prod(), \
-        "Shapes incompatible: Input shape and output shape were not compatible: "
-
-    # Perform view action.
-    slice_length: int = len(input_shape)
-    static_shape: torch.Tensor = torch.tensor(tensor.shape[:-slice_length], dtype=torch.int64)
-
-    final_shape: torch.Tensor = torch.concat([static_shape, output_shape])
-    final_shape: List[int] = final_shape.tolist()
-
-    output: torch.Tensor = tensor.reshape(final_shape)
-    return output
-
-
-def _strided_reshape(tensor: torch.Tensor, input_shape: torch.Tensor, output_shape: torch.Tensor) -> torch.Tensor:
-    """
-    A helper function which performs strided reshape when requested
-    """
-    # Perform view action.
-    slice_length: int = len(input_shape)
-    static_shape: torch.Tensor = torch.tensor(tensor.shape[:-slice_length], dtype=torch.int64)
-
-    final_shape: torch.Tensor = torch.concat([static_shape, output_shape])
-    final_shape: List[int] = final_shape.tolist()
-
-    output: torch.Tensor = tensor.reshape(final_shape)
-    return output
-
-@torch.jit.script
-def reshape(tensor,
-            input_shape: Union[torch.Tensor, List[int], int],
-            output_shape: Union[torch.Tensor, List[int], int],
-            validation: bool = True,
-            task: Optional[str] = None,
-            ) -> torch.Tensor:
-    """
-    This will, when passed an input shape and compatible output shape, assume that said shapes
-    refer to the later dimensions in a tensor, as in broadcasting, and will perform a reshape from
-    input shape to output shape while keeping all other dimensions exactly the same.
-
-
-    ---- parameters ---
-
-    :param tensor:
-        The tensor to be modified.
-    :param input_shape:
-        The expected input shape. This can be a list/tuple of ints, or an int. It should represent the shape at the end
-        of the input tensor's .shape which will be matched in the tensor input
-    :param output_shape:
-        The expected output shape. This can be a list/tuple of ints, or an int. It should represent the final shape one
-        wishes the tensor to take. It also must be the case that the total size of the input and output shape must be the same.
-    :param validation:
-        Whether or not to perform validation on the problem before attempting the reshape. Causes
-        some overhead to occur, but gives good error messages.
-    :param task:
-        Used only when validating, and completely optional. Indicates what task
-        was being performed when the error occurred. Included in error messages,
-        essencially just extra details.
-    ---- Examples ----
-
-
-    For tensors of shape:
-
-    a = (5,2), b=(3, 4, 5,2), c=(30, 5,2),
-
-    For input_shape = (5,2), output_shape=10, one has
-
-    f(a, input_shape, output_shape) = shape(10)
-    f(b, input_shape, output_shape) = shape(3, 4, 10)
-    f(c, input_shape, output_shape) = shape(30, 10)
-
-
-    """
-
-    # Raw Type converison. The goal here is to end up with something solely
-    # in terms of tensors.
-
-    if torch.jit.isinstance(input_shape, int):
-        input_shape = [input_shape]
-    if torch.jit.isinstance(output_shape, int):
-        output_shape = [output_shape]
-
-    if torch.jit.isinstance(input_shape, List[int]):
-        input_shape = torch.tensor(input_shape, dtype=torch.int64)
-    if torch.jit.isinstance(output_shape, List[int]):
-        output_shape = torch.tensor(output_shape, dtype=torch.int64)
-
-    torch.jit.annotate(torch.Tensor, input_shape)
-    torch.jit.annotate(torch.Tensor, output_shape)
-
-    # Basic sanity testing
-    assert input_shape.prod() == output_shape.prod(), \
-        "Shapes incompatible: Input shape and output shape were not compatible: "
-    if tensor.is_sparse:
-        raise ValueError("Resizing of sparse tensors is not yet supported")
-    else:
-        output = _strided_reshape(tensor, input_shape, output_shape)
-    return output
-
-class reshape_map:
-    """
-    A class which will perform mapping from one
-    """
+    pass
 
 
 @torch.jit.script

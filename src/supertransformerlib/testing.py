@@ -9,4 +9,5 @@ class test:
         return torch.reshape(tensor, [5])
 
 instance = test()
+instance = torch.jit.script(instance)
 instance()

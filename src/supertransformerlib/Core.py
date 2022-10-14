@@ -23,7 +23,7 @@ class ValidationError(Exception):
 
         msg = ""
         msg += "A validation error occurred: %s \n" % type
-        msg += "The error occurred because: %s\n" %reason
+        msg += "The error occurred because: \n\n %s\n" %reason
         if tasks is not None:
             tasks = "\n".join(tasks)
             msg += "This occurred while doing tasks: \n\n%s" % tasks
@@ -187,10 +187,9 @@ def standardize_shape(input: StandardShapeType,
         reason = dedent(reason)
         raise StandardizationError(reason, tasks)
     if not allow_negatives and torch.any(output < 0):
-
         reason = f"""\
         Expected parameter '{input_name}' to consist of no elements
-        less than zero. This was not satisfied
+        less than zero. This was not satisfied. 
         """
         reason = dedent(reason)
         raise StandardizationError(reason, tasks)

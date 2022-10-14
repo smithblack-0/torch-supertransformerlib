@@ -25,8 +25,8 @@ class _Linear_Forward:
     """
 
     def __init__(self,
-                 input_map: Tuple[torch.Tensor, torch.Tensor],
-                 output_map: Tuple[torch.Tensor, torch.Tensor],
+                 input_map: Glimpses.Reshape,
+                 output_map: Glimpses.Reshape,
                  kernel: torch.Tensor,
                  bias: torch.Tensor,
                  ):
@@ -42,13 +42,13 @@ class _Linear_Forward:
         input_shape, row_length = self.input_map
         column_length, output_shape = self.output_map
 
-        flattened_input = Glimpses.reshape(tensor, input_shape, row_length)
+        flattened_input = self.input_map(tensor)
         flattened_input = flattened_input.unsqueeze(-1)
 
         flattened_output = torch.matmul(self.kernel, flattened_input).squeeze(-1)
         flattened_output = flattened_output + self.bias
 
-        restored_output = Glimpses.reshape(flattened_output, column_length, output_shape)
+        restored_output = self.output_map(tensor)
         return restored_output
 
 
@@ -119,7 +119,7 @@ class Linear(nn.Module):
     def make_stubs(self,
                            input_shape: torch.Tensor,
                            output_shape: torch.Tensor
-                           )->Tuple[MatrixShape, ReshapeStub, ReshapeStub]:
+                           )->Tuple[MatrixShape, Glimpses.Reshape, Glimpses.Reshape]:
 
         """
         Makes the various shape stubs needed
@@ -133,10 +133,9 @@ class Linear(nn.Module):
         columns = output_shape.prod()
         shape = MatrixShape(rows, columns)
 
-        InputStub = ReshapeStub(input_shape, rows)
-        OutputStub = ReshapeStub(columns, output_shape)
-
-        return shape, InputStub, OutputStub
+        InputMap = Glimpses.Reshape(input_shape, rows)
+        OutputMap = Glimpses.Reshape(columns, output_shape)
+        return shape, InputMap, OutputMap
 
 
     def __init__(self,
@@ -163,19 +162,17 @@ class Linear(nn.Module):
         if dynamics is not None:
             dynamics = standardize_shape(dynamics)
 
+        matrix_spec, input_map, output_map = self.make_stubs(input_shape, output_shape)
 
 
         # Begin developing kernel shapes and conversions
 
-        matrix_rows: torch.Tensor = input_shape.prod().unsqueeze(-1)
-        matrix_columns: torch.Tensor = output_shape.prod().unsqueeze(-1)
+        matrix_rows: torch.Tensor = matrix_spec.rows.unsqueeze(-1)
+        matrix_columns: torch.Tensor = matrix_spec.columns.unsqueeze(-1)
         matrix_shape = torch.concat([matrix_columns, matrix_rows], dim=0)
 
         if use_bias:
             bias_shape = matrix_columns
-
-        input_autoshape_mapping = (input_shape, matrix_rows)
-        output_autoshape_mapping = (matrix_columns, output_shape)
 
         # Introduce modifications to account for parallelization.
         # This consists of additional indepedent dimensions
@@ -200,13 +197,14 @@ class Linear(nn.Module):
         # Register kernels and deployment details
 
         self.use_bias = use_bias
-
-        self.input_map_reference = input_autoshape_mapping
-        self.output_map_reference = output_autoshape_mapping
+        self.input_map = input_map
+        self.output_map = output_map
 
         self.matrix_kernel = matrix_kernel
         if use_bias:
             self.bias_kernel = bias_kernel
+        else:
+            self.bias_kernel = torch.zeros([0])
 
     def setup_forward(self)->_Linear_Forward:
         """
@@ -214,6 +212,8 @@ class Linear(nn.Module):
         call.
 
         """
+
+
         if self.use_bias:
             return _Linear_Forward(self.input_map_reference,
                                    self.output_map_reference,
