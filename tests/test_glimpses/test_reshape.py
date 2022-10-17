@@ -9,6 +9,8 @@ from typing import Type
 import torch
 import itertools
 from src.supertransformerlib import Glimpses, Core
+from src.supertransformerlib.Glimpses import Reshape
+from torch.nn import functional
 
 
 #Controls whether or not to print error messages
@@ -17,6 +19,8 @@ from src.supertransformerlib import Glimpses, Core
 # It also aids in forming reasonable error messages.
 
 print_errors = False
+
+
 
 class testfunctionreshape(unittest.TestCase):
     """
@@ -124,3 +128,57 @@ class testClosure(unittest.TestCase):
         closure = Glimpses.ReshapeClosure(**keywords)
         output = closure(tensor, output_shape=[50])
         self.assertTrue(output.shape == torch.Size([10, 50]))
+
+
+class test_sparse_reshape(unittest.TestCase):
+    """
+    Test that sparse reshape is functional.
+    """
+
+    def test_basic_sparse_reshape(self):
+        """Tests if sparse reshape works at all"""
+
+        tensor = torch.randn([20, 10, 5, 4])
+        tensor = functional.dropout(tensor, 0.5)
+        initial_shape = torch.tensor([5, 4])
+        final_shape = torch.tensor([20])
+        expected_shape = torch.Size([20, 10, 20])
+
+        sparse_tensor = tensor.to_sparse_coo()
+
+        sparse_reshaped = Reshape._sparse_reshape(sparse_tensor, initial_shape, final_shape)
+        self.assertTrue(sparse_reshaped.shape == expected_shape)
+
+    def test_corrolated_sparse_reshape(self):
+        """Tests that performing a sparse reshape and a dense reshape do not work differently."""
+        tensor = torch.randn([20, 10, 5, 4])
+        tensor = functional.dropout(tensor, 0.5)
+        initial_shape = torch.tensor([5, 4])
+        final_shape = torch.tensor([20])
+
+        sparse_tensor = tensor.to_sparse_coo()
+
+
+        sparse_reshaped = Reshape._sparse_reshape(sparse_tensor, initial_shape, final_shape)
+        dense_reshape = Reshape.reshape(tensor, initial_shape, final_shape)
+        correlation = sparse_reshaped.to_dense() == dense_reshape
+        self.assertTrue(torch.all(correlation))
+
+    def test_backprop_sparse_reshape(self):
+        """Test backpropagation travels through sparse reshape"""
+
+        tensor = torch.randn([20, 10, 5, 4], requires_grad=True)
+
+        update = functional.dropout(tensor, 0.5)
+        sparse_tensor = update.to_sparse_coo()
+
+        initial_shape = torch.tensor([20, 10, 5, 4])
+        final_shape = torch.tensor([20*10*5*4])
+
+        sparse_reshaped = Reshape._sparse_reshape(sparse_tensor, initial_shape, final_shape)
+        sparse_reshaped = torch.sparse.sum(sparse_reshaped, dim=0)
+        sparse_reshaped.backward()
+
+        tensor.sum().backward()
+        self.assertTrue(tensor.grad != None)
+

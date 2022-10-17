@@ -1,2 +1,2 @@
-from .Reshape import reshape, ReshapeClosure, ReshapeException, ReshapeFactory
+from .Reshape import reshape, ReshapeClosure, ReshapeException
 from .Glimpses import *

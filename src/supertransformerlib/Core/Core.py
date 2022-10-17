@@ -4,7 +4,7 @@ The module for the ensemble
 extended linear process.
 
 """
-from typing import Union, List, Tuple, Optional, Dict
+from typing import Union, List, Optional, Dict
 
 import torch
 import torch.nn
@@ -122,7 +122,6 @@ class StandardizationError(ValidationError):
 
 StandardShapeType = Union[torch.Tensor, List[int], int]
 
-@torch.jit.script
 def standardize_shape(input: StandardShapeType,
                       input_name: str,
                       allow_negatives: bool = False,
@@ -154,7 +153,7 @@ def standardize_shape(input: StandardShapeType,
             dims = input.dim()
             reason = f"""\
             Expected parameter '{input_name}' to receive 1d tensor representing
-            shape. Number of dimensions was actually %{dims}
+            shape. Number of dimensions was actually {dims}
             """
             reason = dedent(reason)
             raise StandardizationError(reason, task)
@@ -201,7 +200,7 @@ def standardize_shape(input: StandardShapeType,
     return output
 
 
-
+torch.jit.script(standardize_shape)
 
 
 def torchFalse(device: torch.device):
