@@ -1,6 +1,7 @@
 import unittest
 
 import torch
+from torch import nn
 from src.supertransformerlib import Glimpses
 from src.supertransformerlib.Basics import Linear
 from src.supertransformerlib.Core import SparseUtils
@@ -419,4 +420,29 @@ class testLinear(unittest.TestCase):
         closure = layer(dynamic)
         output = closure(tensor)
         self.assertTrue(output.shape == expected_shape)
+    def test_torchscript(self):
+        """ Test that the linear system torchscript compiles"""
+        data = torch.randn([15, 10])
+        instance = Linear.Linear(10, 20)
+        instance = torch.jit.script(instance)
+        closure=  instance()
+        closure(data)
+    def test_configured_dynamic_superposition(self):
+        """ Test that configuration by another layer doesn't throw any errors"""
 
+        test_data = torch.randn([11, 10])
+
+        class Dynamic_Linear_Configuration(nn.Module):
+
+            def __init__(self):
+                super().__init__()
+                self.configuration_layer = Linear.Linear(10, 12)
+                self.execution_layer = Linear.Linear(10, 10, dynamic=12)
+            def forward(self, tensor: torch.Tensor)->torch.Tensor:
+                configuration = self.configuration_layer()(tensor)
+                output = self.execution_layer(configuration)(tensor)
+                return output
+
+        instance = Dynamic_Linear_Configuration()
+        instance = torch.jit.script(instance) #Optional line. Scripts it
+        result = instance(test_data)

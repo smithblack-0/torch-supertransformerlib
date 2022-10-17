@@ -180,10 +180,6 @@ class LinearClosure:
             validate = True
         if bias is not None:
             bias = bias.clone()
-        if input_map is not None:
-            test = input_map
-        else:
-            test = Reshape.ReshapeClosure(1, 1)
 
         self.kernel = kernel.clone()
         self.bias = bias
@@ -536,10 +532,44 @@ class Linear(nn.Module):
     "dynamic" and for which it is the case that weights will need
     to be provided.
 
+    As an example, lets say we have a network of 12 dynamically
+    configurable layers we wish to combine together to create a
+    network, with various configurations being more useful and
+    determined by an earlier step.
+
+    The layer has a mapping of 10 to 10, a batch size of 11,
+    and 12 dynamic kernels to draw from. These kernels may in
+    turn be configured by earlier segments of the model. One
+    might develop something like the following to execute this
+
+    ```
+    import torch
+    from torch import nn
+
+    test_data = torch.randn([11,10])
+
+    class DynamicallyConfiguredLinear(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.configuration_layer =
+
+    configuration_layer = Linear(10, 12)
+    dynamic_layer = Linear(
+
+
+    This could be run by a layer
+    looking along the lines of:
+
+    ```
+
+    tensor = torch.randn([10,
+
+
+    ```
+
 
     """
     ClosureType = LinearClosure
-
     def validate_dynamic(self,
                          dynamic: torch.Tensor,
                          shape: torch.Tensor,
@@ -583,9 +613,6 @@ class Linear(nn.Module):
             raise LinearFactoryException(reason, task)
 
 
-
-
-
     def __init__(self,
                  input_shape: Core.StandardShapeType,
                  output_shape: Core.StandardShapeType,
@@ -606,6 +633,7 @@ class Linear(nn.Module):
         :param device: The device. Defaults to CPU
         :param use_bias: Whether to use biass
         :param do_validation: Whether to do validation, or leave it to torch's native error code.
+            Generally, the validations attached to the layer are a bit more informative.
         """
 
         super().__init__()
