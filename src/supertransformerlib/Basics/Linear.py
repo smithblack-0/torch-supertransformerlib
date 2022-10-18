@@ -11,7 +11,7 @@ three distinct steps. These are
 * Executing the Closure with whatever is so desired.
 
 """
-from typing import Optional, List
+from typing import Optional, List, Tuple
 
 import torch
 from src.supertransformerlib.Glimpses import Reshape
@@ -302,11 +302,13 @@ def make_dense_superposition(dynamics: torch.Tensor,
     """
 
     length = shape.shape[0]
-    dynamics = dynamics.flatten(-length)
-    reduction_location = dynamics.dim() - 1
+    dynamics = dynamics.flatten(0, length-1)
+    reduction_location = 0
     kernel = kernel.flatten(0, length - 1)
     for _ in range(kernel.dim() - 1):
         dynamics = dynamics.unsqueeze(-1)
+    while kernel.dim() < dynamics.dim():
+        kernel = kernel.unsqueeze(1)
 
     weighted_kernel = dynamics * kernel
     superimposed_kernel = weighted_kernel.sum(dim=reduction_location)
@@ -336,7 +338,7 @@ def make_sparse_superposition(dynamics: torch.Tensor,
 
     length = shape.shape[0]
     input_shape = shape
-    output_shape = torch.tensor([shape.prod()])
+    output_shape = torch.tensor([int(shape.prod())])
     dynamics = Reshape.reshape(dynamics, input_shape, output_shape, task="flattening sparse dynamic tensor")
     kernel = kernel.flatten(0, length - 1)
 
@@ -374,7 +376,11 @@ def make_sparse_superposition(dynamics: torch.Tensor,
     kernel = kernel.sparse_mask(dynamics)
 
     weighted_kernel = kernel * dynamics
-    superimposed_kernel = torch.sparse.sum(weighted_kernel, dim=0)
+
+    # The following sum is utilized due to the fact that torch.sparse.sum
+    # is broken under torchscript. It would have had to of been compiled
+    # on location to be useful.
+    superimposed_kernel = torch._sparse_sum(weighted_kernel, 0) #noqa
     return superimposed_kernel
 
 def make_superposition(dynamic: torch.Tensor,
@@ -530,12 +536,23 @@ class Linear(nn.Module):
 
     You may define a kernelspace of arbitrary shape to be designated
     "dynamic" and for which it is the case that weights will need
-    to be provided.
+    to be provided. Notably, these weights need a little discussion.
+    Unlike the parallel kernels, the dynamic dimensions must
+    corrolate with the beginning of the tensor. That is, if you
+    have dynamic dimensions of [12, 5], then your weight tensor
+    must start with shape [12, 5]. This is due to restrictions
+    in how torch handles sparse hybrid tensors, which can be
+    utilized for the process. The remaining dimensions after
+    this should be whatever batch features are needed
 
     As an example, lets say we have a network of 12 dynamically
-    configurable layers we wish to combine together to create a
-    network, with various configurations being more useful and
-    determined by an earlier step.
+    configured layer that are configured per batch entry across
+    a batch of shape [7, 7]. The linear operation should map
+    from size 5 to size 6. The layer should first
+    setup a configuration, then generate a dynamic superposition
+    and execute linear.
+
+
 
     The layer has a mapping of 10 to 10, a batch size of 11,
     and 12 dynamic kernels to draw from. These kernels may in
@@ -543,29 +560,37 @@ class Linear(nn.Module):
     might develop something like the following to execute this
 
     ```
-    import torch
-    from torch import nn
-
-    test_data = torch.randn([11,10])
-
-    class DynamicallyConfiguredLinear(nn.Module):
-        def __init__(self):
-            super().__init__()
-            self.configuration_layer =
-
-    configuration_layer = Linear(10, 12)
-    dynamic_layer = Linear(
+        batch_shape = [7, 7]
+        input_dim = 5
+        output_dim = 6
+        dynamic = 12
 
 
-    This could be run by a layer
-    looking along the lines of:
+        test_data = torch.randn([*batch_shape, input_dim])
+
+        class Dynamic_Linear_Configuration(nn.Module):
+
+            def __init__(self):
+                super().__init__()
+                self.configuration_layer = Linear.Linear(input_dim, dynamic)
+                self.execution_layer = Linear.Linear(input_dim, output_dim, dynamic=dynamic)
+            def forward(self, tensor: torch.Tensor)->torch.Tensor:
+                configuration = self.configuration_layer()(tensor)
+                configuration = torch.relu(configuration)
+                configuration = configuration.movedim(-1, 0) #Notice the move required to place the dynamic dim to the front.
+                output = self.execution_layer(configuration)(tensor)
+                return output
+
+        instance = Dynamic_Linear_Configuration()
+        instance = torch.jit.script(instance) #Optional line. Scripts it
+        output = instance(test_data)
 
     ```
 
-    tensor = torch.randn([10,
-
-
-    ```
+    Notably, this is far from the only way to configure the dynamic layers. Of
+    particular note, it is possible do use a sparse weight network instead. As
+    long as you provide a hybrid sparse tensor, with the sparse dimensions
+    defining the active dynamic kernels, the system will handle the rest.
 
 
     """
@@ -590,7 +615,9 @@ class Linear(nn.Module):
             """
             reason = Core.dedent(reason)
             raise LinearFactoryException(reason, task)
-        if dynamic.shape[:shape_dim] != torch.Size(shape):
+
+        shape_as_list: List[int] = shape.tolist()
+        if dynamic.shape[:shape_dim] != torch.Size(shape_as_list):
             dynamic_shape = dynamic.shape[:shape_dim]
 
             reason = f"""\
@@ -620,7 +647,7 @@ class Linear(nn.Module):
                  dynamic: Optional[Core.StandardShapeType] = None,
                  dtype: Optional[torch.dtype] = None,
                  device: Optional[torch.device] = None,
-                 use_bias: Optional[bool] = True,
+                 use_bias: bool = True,
                  do_validation: bool = True,
                  ):
         """
@@ -677,6 +704,7 @@ class Linear(nn.Module):
         :param task:
         :return:
         """
+
         if self.dynamic is None and dynamic is not None:
             reason = f"""\
             Factory was called with non-None dynamic, but layer 
@@ -694,7 +722,8 @@ class Linear(nn.Module):
             raise LinearFactoryException(reason, task)
 
         dynamic_shape = self.dynamic # Must copy line into local memory or torchscript throws a fit when refining types.
-        if dynamic_shape is not None:
+        if dynamic_shape is not None and dynamic is not None:
+            torch.jit.annotate(torch.Tensor, dynamic)
             self.validate_dynamic(dynamic, dynamic_shape, task)
 
             matrix = self.kernel
@@ -705,6 +734,7 @@ class Linear(nn.Module):
                 bias = make_superposition(dynamic, bias, dynamic_shape)
             else:
                 bias = None
+
         else:
             matrix = self.kernel
             bias = self.bias

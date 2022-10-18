@@ -40,7 +40,8 @@ def validate_sparse_reshape(tensor: torch.Tensor,
         raise ReshapeException(reason, task)
 
     sparse_shape = tensor.shape[:sparse_dim]
-    if sparse_shape[-reshape_dim:] != torch.Size(input_shape):
+    input_shape_as_list: List[int] = input_shape.tolist() #Line required to prevent torchscript from throwing a fit
+    if sparse_shape[-reshape_dim:] != torch.Size(input_shape_as_list):
         temp_input_shape = torch.Size(input_shape)
         tensor_shape = sparse_shape[-reshape_dim:]
         reason = f"""\
@@ -109,7 +110,8 @@ def _sparse_reshape(tensor: torch.Tensor,
     broadcast_length = input_shape.shape[0]
     static_shape = torch.tensor(sparse_shape[:-broadcast_length], dtype=torch.int64)
     final_shape = torch.concat([static_shape, output_shape])
-    final_strides = Core.calculate_shape_strides(final_shape)
+    final_shape_as_list: List[int] = final_shape.tolist() #Line required or torchscript throws a hissy fit
+    final_strides = Core.calculate_shape_strides(final_shape_as_list)
 
     # Use strides to reassemble flat indices. This is a little
     # complex, so here is what is going on
@@ -123,7 +125,8 @@ def _sparse_reshape(tensor: torch.Tensor,
     indices = torch.remainder(indices, final_shape.unsqueeze(-1))
 
     entire_shape = torch.concat([final_shape, torch.tensor(dense_shape, dtype=torch.int64)])
-    entire_shape = torch.Size(entire_shape)
+    entire_shape_as_list: List[int] = entire_shape.tolist() # Line required or torchscript throws a fit
+    entire_shape = torch.Size(entire_shape_as_list)
 
     output = torch.sparse_coo_tensor(indices, values, size=entire_shape)
     if not output.is_coalesced():
@@ -353,7 +356,7 @@ class ReshapeFactory(nn.Module):
         self.validate = validate
         self.task = task
 
-    def __call__(self) -> ReshapeClosure:
+    def forward(self) -> ReshapeClosure:
         closure = ReshapeClosure(
             self.input_shape,
             self.output_shape,

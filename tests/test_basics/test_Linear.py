@@ -249,11 +249,20 @@ class testKernelSuperposition(unittest.TestCase):
     def test_dense_superposition(self):
 
         kernel = torch.randn([10, 20, 30, 5, 4])
-        dynamics = torch.randn([7, 8, 10, 20])
+        dynamics = torch.randn([10, 20, 7, 8])
         dynamic_shape = torch.tensor([10, 20])
         expected_shape = torch.Size([7, 8, 30, 5, 4])
 
+
+        #Standard
+
         output = Linear.make_dense_superposition(dynamics, kernel, dynamic_shape)
+        self.assertTrue(output.shape == expected_shape)
+
+        #Torchscript
+
+        function = torch.jit.script(Linear.make_dense_superposition)
+        output = function(dynamics, kernel, dynamic_shape)
         self.assertTrue(output.shape == expected_shape)
 
     def test_sparse_superposition(self):
@@ -269,6 +278,9 @@ class testKernelSuperposition(unittest.TestCase):
         sparse_dynamics = torch.sparse_coo_tensor(indices, values, size=hybrid_shape).coalesce()
 
         expected_shape = torch.Size([7, 8, 30, 5, 4])
+
+        #Standard
+
         output = Linear.make_sparse_superposition(sparse_dynamics, kernel, dynamic_shape)
         self.assertTrue(output.shape == expected_shape)
         self.assertTrue(output.is_sparse == False)
@@ -276,6 +288,24 @@ class testKernelSuperposition(unittest.TestCase):
         output.sum().backward()
         self.assertTrue(kernel.grad != None)
         self.assertTrue(dynamics.grad != None)
+
+        #Torchscript
+
+        mask = torch.randn([10, 20]) > 0
+        indices = SparseUtils.gen_indices_from_mask(mask)
+        values = dynamics[..., mask].movedim(-1, 0)
+        hybrid_shape = [10, 20, 7, 8]
+        sparse_dynamics = torch.sparse_coo_tensor(indices, values, size=hybrid_shape).coalesce()
+
+        func = torch.jit.script(Linear.make_sparse_superposition)
+        output = func(sparse_dynamics, kernel, dynamic_shape)
+        self.assertTrue(output.shape == expected_shape)
+        self.assertTrue(output.is_sparse == False)
+
+        output.sum().backward()
+        self.assertTrue(kernel.grad != None)
+        self.assertTrue(dynamics.grad != None)
+
 
 class testLinearErrors(unittest.TestCase):
     def test_missing_dynamic(self):
@@ -398,12 +428,13 @@ class testLinear(unittest.TestCase):
         expected_shape = torch.Size([7, 5, 4, 6, 5])
 
         layer = Linear.Linear(**keywords)
+        layer = torch.jit.script(layer)
         closure = layer()
         output = closure(tensor)
         self.assertTrue(output.shape == expected_shape)
 
-    def test_dynamic_superposition(self):
-        """ Test that dynamic superposition works properly"""
+    def test_dynamic_superposition_dense(self):
+        """ Test that dynamic superposition works properly when doing dense superposition"""
 
         """Tests usage on parallel tensors"""
         tensor = torch.randn([7, 5, 4, 6, 10])
@@ -417,6 +448,16 @@ class testLinear(unittest.TestCase):
 
         dynamic = torch.rand([11])
         layer = Linear.Linear(**keywords)
+
+        #Standard
+
+        closure = layer(dynamic)
+        output = closure(tensor)
+        self.assertTrue(output.shape == expected_shape)
+
+        #Torchscript
+
+        layer = torch.jit.script(layer)
         closure = layer(dynamic)
         output = closure(tensor)
         self.assertTrue(output.shape == expected_shape)
@@ -425,24 +466,56 @@ class testLinear(unittest.TestCase):
         data = torch.randn([15, 10])
         instance = Linear.Linear(10, 20)
         instance = torch.jit.script(instance)
-        closure=  instance()
+        closure = instance()
         closure(data)
+
     def test_configured_dynamic_superposition(self):
         """ Test that configuration by another layer doesn't throw any errors"""
+        batch_shape = [7, 7]
+        input_dim = 5
+        output_dim = 6
+        dynamic = 12
 
-        test_data = torch.randn([11, 10])
-
+        test_data = torch.randn([*batch_shape, input_dim])
         class Dynamic_Linear_Configuration(nn.Module):
 
             def __init__(self):
                 super().__init__()
-                self.configuration_layer = Linear.Linear(10, 12)
-                self.execution_layer = Linear.Linear(10, 10, dynamic=12)
+                self.configuration_layer = Linear.Linear(input_dim, dynamic)
+                self.execution_layer = Linear.Linear(input_dim, output_dim, dynamic=dynamic)
             def forward(self, tensor: torch.Tensor)->torch.Tensor:
                 configuration = self.configuration_layer()(tensor)
+                configuration = configuration.movedim(-1, 0) #Notice the move required to place the dynamic dim to the front.
                 output = self.execution_layer(configuration)(tensor)
                 return output
 
         instance = Dynamic_Linear_Configuration()
         instance = torch.jit.script(instance) #Optional line. Scripts it
-        result = instance(test_data)
+        output = instance(test_data)
+
+    def test_sparse_configured_dynamic_superposition(self):
+        """Tests sparse dynamic setup and superposition"""
+        batch_shape = [7, 7]
+        input_dim = 5
+        output_dim = 6
+        dynamic = 12
+
+        test_data = torch.randn([*batch_shape, input_dim])
+
+        class Dynamic_Linear_Configuration(nn.Module):
+
+            def __init__(self):
+                super().__init__()
+                self.configuration_layer = Linear.Linear(input_dim, dynamic)
+                self.execution_layer = Linear.Linear(input_dim, output_dim, dynamic=dynamic)
+
+            def forward(self, tensor: torch.Tensor) -> torch.Tensor:
+                configuration = self.configuration_layer()(tensor)
+                configuration = configuration.movedim(-1,
+                                                      0)  # Notice the move required to place the dynamic dim to the front.
+                output = self.execution_layer(configuration)(tensor)
+                return output
+
+        instance = Dynamic_Linear_Configuration()
+        instance = torch.jit.script(instance)  # Optional line. Scripts it
+        output = instance(test_data)
