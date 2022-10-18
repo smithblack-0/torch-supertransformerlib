@@ -10,18 +10,22 @@ prior elements, post elements, and offset.
 import torch
 from torch import nn
 from src.supertransformerlib.Core import Core
-from typing import Tuple, List
+from typing import Tuple, List, Optional
 
 # Not actually utilized, but manually impliments the process.
 # It is instead far more efficient to use as strided
-def example_generator(test_list: torch.Tensor, start: int, end: int, dilation: int,  stride: int, offset: int):
-    output: List[torch.Tensor] = []
-    for i in range(0, len(test_list), stride):
-        options = torch.range(start, end).to(dtype=torch.int64)*dilation + i + offset
-        if torch.all(0 <= options) and torch.all(options < len(test_list)):
-            sample = test_list[options]
-            output.append(sample)
-    return output
+
+class ConvolutionalError(Core.ValidationError):
+    """
+    An error to throw when convolution is going badly
+    """
+    def __init__(self, reason: str, task: Optional[str] = None):
+        self.reason = reason
+        self.task = task
+        super().__init__("ConvolutionalError", reason, task)
+
+
+
 
 def calculate_min_max_sample_locations(
         dim_length: torch.Tensor,
@@ -35,7 +39,6 @@ def calculate_min_max_sample_locations(
     Calculates the conceptual minimum sample
     location and maximum sample location. Assumes we
     are bounded only on the nearest edge.
-
 
     :param dim_length: How long the dimension is.
     :param start: The start point for the kernel
@@ -78,11 +81,11 @@ def calculate_min_max_sample_locations(
 
     minimum_unstrided_sampling_location = -start * dilation
     mintemp = torch.div(minimum_unstrided_sampling_location - offset, stride)
-    offset_minimum_location = stride*torch.ceil(mintemp) + offset
+    offset_minimum_location = stride*torch.ceil(mintemp).to(dtype=torch.int64) + offset
 
     maximum_unstrided_sampling_location = dim_length - end * dilation - 1
     maxtemp = torch.div(maximum_unstrided_sampling_location - offset, stride)
-    offset_maximum_location = stride*torch.floor(maxtemp) + offset
+    offset_maximum_location = stride*torch.floor(maxtemp).to(dtype=torch.int64) + offset
 
     return offset_minimum_location, offset_maximum_location
 
@@ -94,21 +97,98 @@ def calculate_requisite_padding(
         dilation: torch.Tensor,
         offset: torch.Tensor)->Tuple[torch.Tensor, torch.Tensor]:
     """
-    Calculates required amount of additional padding needed in order to
-    ensure entire defined sample space can be sampled from.
+    Calculates required amount of additional padding required for the
+    current problem to execute without shrinking the dimensions of the
+    problem.
 
-    :param dim_length:
-    :param start:
-    :param end:
-    :param stride:
-    :param dilation:
-    :param offset:
-    :return:
+    :param dim_length: How long the indicated dimension will be
+    :param start: The sampling kernel start numbe
+    :param end: The sampling kernel end number
+    :param stride: The stride rate
+    :param dilation: The dilation rate
+    :param offset: The offset
+    :return: The required prior padding. The required post padding.
     """
 
+    ## Imagine looking at an array with elements starting at zero and going
+    # up. The location you are pulling around is known as the sampling location.
+    #
+    # We call the padded start location target min, padded final target max,
+    # and calculate the true min and true max. Then
 
-)
+    min_padded_sampling_location = offset
+    max_padded_sampling_location = torch.div(dim_length, stride, rounding_mode="trunc")*stride + offset
 
+    min_native_sampling_location, max_native_sampling_location = calculate_min_max_sample_locations(
+        dim_length,
+        start,
+        end,
+        stride,
+        dilation,
+        offset
+    )
+
+
+def native_convolutional_sample(
+                  tensor: torch.Tensor,
+                  start: torch.Tensor,
+                  end: torch.Tensor,
+                  stride: torch.Tensor,
+                  dilation: torch.Tensor,
+                  offset: torch.Tensor,
+                  task: Optional[str],
+                  )->torch.Tensor:
+    """
+    The 'Native' convolutional mode. Shrinks the output as
+    would be expected when doing a convolution.
+
+    Convolutional sampling is performed with respect to the
+    tensor index with regards to the nearby neighbors.
+    """
+    local_lengths = start.shape[0]
+    dim_lengths = torch.tensor(tensor.shape[-local_lengths:])
+    native_start_sample, native_end_sample = calculate_min_max_sample_locations(dim_lengths, start, end,
+                                                                                stride, dilation, offset)
+
+    kernel_length = (end - start + 1) * dilation
+    if torch.any(kernel_length > dim_lengths):
+        reason = f"""\
+        Kernel is too large for native processing. The
+        kernel is defined as (end-start +1)*dilations, 
+        which works out to be {kernel_length}. However,
+        the dimension lengths are {dim_lengths}. Reformat
+        the problem such that dim_lengths are less than
+        kernel lengths, or switch to another mode.
+        """
+        reason = Core.dedent(reason)
+        raise ConvolutionalError(reason, task)
+
+    # Calculate the new shape. We do this by calculating how many strides are jumped between
+    # the starting and ending sample point. This, plus one, is equal to the number of samples.
+
+    static_shape = torch.tensor(tensor.shape[:-local_lengths])
+    raw_shape = torch.div(native_end_sample-native_start_sample, stride, rounding_mode="trunc") + 1
+    shape = torch.where(native_start_sample <= native_end_sample, raw_shape, 0)
+    shape = torch.concat([static_shape, shape, end-start + 1])
+
+    # Calculate the updated strides. There are two things we need to develop. First,
+    # the primary dimension may need it's stride rate changed in order to account
+    # for the fact that the instruction was provided with a stride rate. Second,
+    # it should be the case that we can multiply the raw stride rates by the dilations to
+    # get the rate of sampling for the various sample dimensions
+
+    input_stride = torch.tensor([tensor.stride(dim) for dim in range(tensor.dim())])  # Workaround for bad typing on Tensor.stride
+    setaside_stride, strides_to_update = input_stride[:-local_lengths], input_stride[-local_lengths:]
+    updated_strides = strides_to_update*stride
+    sample_strides = strides_to_update*dilation
+    stride = torch.concat([setaside_stride, updated_strides, sample_strides], dim=0)
+
+    # We now calculate the offsets. Operating under the premise that if we travel
+    # distance stride along the memory buffer we will reach the next entry,
+
+    size_as_list: List[int] = shape.tolist()
+    stride_as_list: List[int] = stride.tolist()
+    return tensor.as_strided(size_as_list, stride_as_list)
 
 def convolutional_sample(
                   tensor: torch.Tensor,
@@ -118,6 +198,7 @@ def convolutional_sample(
                   dilation: torch.Tensor,
                   offset: torch.Tensor,
                   mode: str = "pad",
+                  task: Optional[str] = None,
                   )->torch.Tensor:
     """
     Performs kernel sampling from an incoming kernel based on the indicated
@@ -143,8 +224,67 @@ def convolutional_sample(
             concatenating all the samples together.
     """
 
+    # Perform primary validation
+
+    start = Core.standardize_shape(start, 'start', True, True, task)
+    end = Core.standardize_shape(end, 'end', True, True, task)
+    stride = Core.standardize_shape(stride, 'stride', False, False, task)
+    dilation = Core.standardize_shape(dilation, 'dilation', False, False, task)
+    offset = Core.standardize_shape(offset, 'offset', True, True, task)
+
+    if start.shape[0] > tensor.dim():
+        reason = f"""\
+        A problem occurred while attempting to perform convolutional
+        sampling. The passed start tensor was of rank {start.shape[0]},
+        while the tensor only had rank {tensor.dim()}. This is not
+        allowed.
+        """
+        reason = Core.dedent(reason)
+        raise ConvolutionalError(reason, task)
+    if start.shape[0] != end.shape[0]:
+        reason = f"""\
+        Param 'start' and param 'end' did not have 
+        the same rank. 'start' has rank {start.shape[0]}
+        while 'end' has rank {end.shape[0]}
+        """
+        reason = Core.dedent(reason)
+        raise ConvolutionalError(reason, task)
+    if start.shape[0] != stride.shape[0]:
+        reason = f"""\
+        Param 'start' and param 'stride' did not have the
+        same rank. 'start' has rank {start.shape[0]} while
+        'stride' has rank {stride.shape[0]}
+        """
+        reason = Core.dedent(reason)
+        raise ConvolutionalError(reason, task)
+    if start.shape[0] != dilation.shape[0]:
+        reason = f"""\
+        Param 'start' and param 'dilation' did not have
+        the same rank. 'start' has rank {start.shape[0]} while
+        'dilation' has rank {dilation.shape[0]}
+        """
+        reason = Core.dedent(reason)
+        raise ConvolutionalError(reason, task)
+    if start.shape[0] != offset.shape[0]:
+        reason = f"""\
+        Param 'offset' and param 'start' did not have the
+        same rank. 'start' had rank {start.shape[0]} while offset
+        had rank {offset.shape[0]}
+        """
+        reason = Core.dedent(reason)
+        raise ConvolutionalError(reason, task)
+    if torch.any(start > end):
+        reason = f"""\
+        Start nodes were higher than end nodes. This is not 
+        allowed. 
+        """
+        reason = Core.dedent(reason)
+        raise ConvolutionalError(reason, task)
 
 
+    if mode == "native":
+        return native_convolutional_sample(tensor, start, end,
+                                            stride,dilation,offset,task)
 
 
 

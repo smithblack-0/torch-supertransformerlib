@@ -13,7 +13,6 @@ from torch.nn import functional as F
 from typing import Union, List
 
 
-@torch.jit.script
 def local(tensor: torch.Tensor,
           kernel_width: int,
           stride_rate: int,

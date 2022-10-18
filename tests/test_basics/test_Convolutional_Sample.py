@@ -6,7 +6,81 @@ kernel sampling functions and features
 """
 import unittest
 import torch
+import itertools
 from src.supertransformerlib.Basics import ConvolutionalSample
+from typing import List
+
+def native_example_generator(test_list: torch.Tensor, start: int, end: int,  stride: int,  dilation: int, offset: int):
+    """
+    Manually generates a native
+    view equivalent, in a not-very-efficient loop.
+
+    Used for testing. Works only in one dimension
+    at a time
+    """
+
+    output: List[torch.Tensor] = []
+    iterater = range(0, test_list.shape[-1], stride)
+    for i in iterater:
+        options = torch.range(start, end).to(dtype=torch.int64)*dilation + i + offset
+        if torch.all(0 <= options) and torch.all(options < test_list.shape[-1]):
+            sample = test_list[..., options]
+            output.append(sample)
+    return torch.stack(output, -2)
+
+
+def padded_example_generator(test_list: torch.Tensor, start: int, end: int, dilation: int, stride: int, offset: int):
+    """
+    Manually generates a padded
+    view equivalent, in a not-very-efficient loop.
+
+    Used for testing. Works only in one dimension
+    at a time
+    """
+
+    output: List[torch.Tensor] = []
+    for i in range(0, len(test_list), stride):
+        options = torch.range(start, end).to(dtype=torch.int64) * dilation + i + offset
+        accumulator = []
+        for option in options:
+            if option >= 0 and option < len(test_list):
+                accumulator.append(test_list[option])
+            else:
+                accumulator.append(0)
+        result = torch.tensor(accumulator)
+        output.append(result)
+    return torch.stack(output, -2)
+
+class test_native_cases(unittest.TestCase):
+    """
+    Uses the native test case generator to test a variety of different cases with
+    different specifications
+    """
+    def test_particular(self):
+
+        tensor = torch.arange(1000).view(10, 100)
+
+        output = ConvolutionalSample.convolutional_sample(tensor, -3, 0, 1, 2, 0, mode="native")
+        print(output.shape)
+    def test_run(self):
+
+        tensor = torch.arange(200).view(10, 20)
+        starts = [-3, -2, -1, 0]
+        ends = [0, 1, 2, 3, 4]
+        strides = [1, 2, 3, 4]
+        dilations = [1, 2, 3, 4]
+        offsets = [0]
+
+        options = itertools.product(starts, ends, strides, dilations, offsets)
+
+        for option in options:
+            if option[2] == 2:
+                print(option)
+            expected = native_example_generator(tensor, *option)
+            got = ConvolutionalSample.convolutional_sample(tensor, *option, mode="native")
+            self.assertTrue(torch.all(expected == got))
+
+
 
 class test_simple_convolutional(unittest.TestCase):
     """
@@ -20,19 +94,21 @@ class test_simple_convolutional(unittest.TestCase):
     def test_simple_sampling_case(self):
         """Test that a straightforward sampling proceeds as expected"""
         tensor = torch.arange(5)
-        start = torch.tensor(-1)
-        end = torch.tensor(1)
-        dilation = torch.tensor(1)
-        stride = torch.tensor(1)
-        offset = torch.tensor(0)
+        start = torch.tensor([-1])
+        end = torch.tensor([1])
+        dilation = torch.tensor([1])
+        stride = torch.tensor([1])
+        offset = torch.tensor([0])
         mode = "native"
 
         expected_shape = torch.tensor([3, 3])
         expected_tensor = torch.tensor([[0, 1, 2], [1, 2, 3], [2, 3, 4]])
 
-        output = ...
+        output = ConvolutionalSample.convolutional_sample(tensor, start, end,
+                                                          dilation, stride, offset,
+                                                          mode)
         self.assertTrue(output.shape == torch.Size(expected_shape))
-        self.assertTrue(output == expected_tensor)
+        self.assertTrue(torch.all(output == expected_tensor))
 
     def test_simple_padded_case(self):
         """Test that a straightforward sampling with padding proceeds as expected """
@@ -173,4 +249,16 @@ class test_simple_convolutional(unittest.TestCase):
 
 
 
-class test_convolutional_sample_
+class test_native_errors(unittest.TestCase):
+    """
+    Test that native convolution throws appropriate
+    errors when called.
+    """
+    def test_tensor_rank_insufficient(self):
+        pass
+    def test_tensor_dim_not_large_enough_simple(self):
+        pass
+    def test_tensor_dim_not_large_enough_dilated(self):
+        pass
+    def test_tensor_dim_not_large_enough_2d(self):
+        pass
