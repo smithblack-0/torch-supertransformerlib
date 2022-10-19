@@ -12,11 +12,11 @@ from typing import List
 
 def native_example_generator(test_list: torch.Tensor, start: int, end: int,  stride: int,  dilation: int, offset: int):
     """
-    Manually generates a native
-    view equivalent, in a not-very-efficient loop.
+    Manually generates a native view equivalent, in a not-very-efficient loop.
+    Used for testing and for giving an idea as to how the damn view shoud
+    work.
 
-    Used for testing. Works only in one dimension
-    at a time
+    Works in 1d, on the last dimension.
     """
 
     output: List[torch.Tensor] = []
@@ -26,30 +26,14 @@ def native_example_generator(test_list: torch.Tensor, start: int, end: int,  str
         if torch.all(0 <= options) and torch.all(options < test_list.shape[-1]):
             sample = test_list[..., options]
             output.append(sample)
-    return torch.stack(output, -2)
+    if len(output) > 0:
+        return torch.stack(output, -2)
+    else:
+        shape = [*test_list.shape[:-1], 0, end-start + 1]
+        return torch.empty(shape, dtype = test_list.dtype)
 
 
-def padded_example_generator(test_list: torch.Tensor, start: int, end: int, dilation: int, stride: int, offset: int):
-    """
-    Manually generates a padded
-    view equivalent, in a not-very-efficient loop.
 
-    Used for testing. Works only in one dimension
-    at a time
-    """
-
-    output: List[torch.Tensor] = []
-    for i in range(0, len(test_list), stride):
-        options = torch.range(start, end).to(dtype=torch.int64) * dilation + i + offset
-        accumulator = []
-        for option in options:
-            if option >= 0 and option < len(test_list):
-                accumulator.append(test_list[option])
-            else:
-                accumulator.append(0)
-        result = torch.tensor(accumulator)
-        output.append(result)
-    return torch.stack(output, -2)
 
 class test_native_cases(unittest.TestCase):
     """
@@ -58,10 +42,15 @@ class test_native_cases(unittest.TestCase):
     """
     def test_particular(self):
 
-        tensor = torch.arange(1000).view(10, 100)
+        tensor = torch.arange(10).view(1, 10)
 
-        output = ConvolutionalSample.convolutional_sample(tensor, -3, 0, 1, 2, 0, mode="native")
+        expected = native_example_generator(tensor, -3, 0, 2, 1, 0)
+        output = ConvolutionalSample.convolutional_sample(tensor, -3, 0, 2, 1, 0, mode="native")
+
+        print(expected)
+        print(output)
         print(output.shape)
+
     def test_run(self):
 
         tensor = torch.arange(200).view(10, 20)
@@ -69,16 +58,19 @@ class test_native_cases(unittest.TestCase):
         ends = [0, 1, 2, 3, 4]
         strides = [1, 2, 3, 4]
         dilations = [1, 2, 3, 4]
-        offsets = [0]
+        offsets = [-1, 0, 1]
 
         options = itertools.product(starts, ends, strides, dilations, offsets)
 
         for option in options:
-            if option[2] == 2:
-                print(option)
             expected = native_example_generator(tensor, *option)
             got = ConvolutionalSample.convolutional_sample(tensor, *option, mode="native")
-            self.assertTrue(torch.all(expected == got))
+            try:
+                self.assertTrue(torch.all(expected == got))
+            except Exception as err:
+                print("failure with combo")
+                print(option)
+                raise err
 
 
 

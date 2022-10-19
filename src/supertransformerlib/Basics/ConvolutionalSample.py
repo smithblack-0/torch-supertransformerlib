@@ -142,16 +142,23 @@ def native_convolutional_sample(
     The 'Native' convolutional mode. Shrinks the output as
     would be expected when doing a convolution.
 
+    It is the case that a kernel of the correct width
+    is sampled from, starting at the zeroith
+    dimension and then offset by the appropriate amount.
+
+    Then only valid positions are sampled from.
+
     Convolutional sampling is performed with respect to the
     tensor index with regards to the nearby neighbors.
     """
     local_lengths = start.shape[0]
+    node_lengths = end-start
     dim_lengths = torch.tensor(tensor.shape[-local_lengths:])
     native_start_sample, native_end_sample = calculate_min_max_sample_locations(dim_lengths, start, end,
                                                                                 stride, dilation, offset)
 
-    kernel_length = (end - start + 1) * dilation
-    if torch.any(kernel_length > dim_lengths):
+    kernel_length = (node_lengths + 1) * dilation
+    if torch.any(kernel_length > dim_lengths) and False:
         reason = f"""\
         Kernel is too large for native processing. The
         kernel is defined as (end-start +1)*dilations, 
@@ -181,14 +188,51 @@ def native_convolutional_sample(
     setaside_stride, strides_to_update = input_stride[:-local_lengths], input_stride[-local_lengths:]
     updated_strides = strides_to_update*stride
     sample_strides = strides_to_update*dilation
-    stride = torch.concat([setaside_stride, updated_strides, sample_strides], dim=0)
+    stride_update = torch.concat([setaside_stride, updated_strides, sample_strides], dim=0)
 
-    # We now calculate the offsets. Operating under the premise that if we travel
-    # distance stride along the memory buffer we will reach the next entry,
+    # We now calculate the offsets. There are a few primary things which need to be handled
+    #
+    # The design criteria is to always imagine beginning sampling at position zero,
+    # then offset, then jump forward and backwards by the appropriate amount. Then,
+    # for each of the possible sampling locations, keep only the examples that are valid
+    #
+    # However, it is the case that the as_strided method only begins sampling where valid.
+    # As a result, we must shift the start and end points slightly using offset and dimensional
+    # pruning to ensure we match the theoredical criteria. It will also be the case the shape
+    # may need to be modified to account for the offset.
+    #
+    # Imagining element 0 as the start location, the difference between the ideal
+    # and actual element's start location is given by dilation*start, which is
+    # then rounded to the next stride node to find the native offset.
+
+
+    proper_start_location = -dilation*start
+    temp = torch.div(proper_start_location, stride)
+    proper_sample_start_location = stride*torch.ceil(temp).to(dtype=torch.int64)
+    native_offset = proper_sample_start_location-proper_start_location
+
+    # With the native offset developed, we go ahead and adjust it using
+    # the striding to turn it into actual offsets. Then we sum everything
+    # together to get the final int offset
+
+    offset = native_offset*strides_to_update
+    offset = offset.sum()
+    offset = int(offset)
+
+    # Once the native offset is developed, it is time to modify the shape if needed. The number
+    # of samples chances that will be performed, period, over a particular window is determined by
+    # number of nodes. as_strided will (attempt) to sample as many times as is needed to completely
+    # fill up the shape. We scale down the number of samples to make sure we do not demand more
+    # samples than can actually be performed. In the worst case, we end up with a length of zero
+
+
+
+
 
     size_as_list: List[int] = shape.tolist()
-    stride_as_list: List[int] = stride.tolist()
-    return tensor.as_strided(size_as_list, stride_as_list)
+    stride_as_list: List[int] = stride_update.tolist()
+
+    return tensor.as_strided(size_as_list, stride_as_list, offset)
 
 def convolutional_sample(
                   tensor: torch.Tensor,
