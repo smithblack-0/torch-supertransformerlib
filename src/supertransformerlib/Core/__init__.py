@@ -1,2 +1,3 @@
-from . Core import *
-from . SparseUtils import *
+from .Core import *
+from .SparseUtils import *
+from . import Reshape
