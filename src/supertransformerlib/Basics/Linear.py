@@ -11,10 +11,10 @@ three distinct steps. These are
 * Executing the Closure with whatever is so desired.
 
 """
-from typing import Optional, List, Tuple
+from typing import Optional, List
 
 import torch
-from src.supertransformerlib.Glimpses import Reshape
+from src.supertransformerlib.Core import Reshape
 from src.supertransformerlib import Core
 
 from torch import nn
