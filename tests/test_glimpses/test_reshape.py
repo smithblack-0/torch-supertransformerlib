@@ -7,9 +7,8 @@ import unittest
 from typing import Type
 
 import torch
-import itertools
 from src.supertransformerlib import Glimpses, Core
-from src.supertransformerlib.Glimpses import Reshape
+from src.supertransformerlib.Core import Reshape
 from torch.nn import functional
 
 
