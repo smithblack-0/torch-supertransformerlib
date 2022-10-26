@@ -15,6 +15,7 @@ from typing import Optional, List
 
 import torch
 
+import src.supertransformerlib.Core as Core
 import src.supertransformerlib.Core.Errors
 import src.supertransformerlib.Core.Functions
 import src.supertransformerlib.Core.StringUtil
@@ -24,7 +25,7 @@ from src.supertransformerlib import Core
 from torch import nn
 
 
-class LinearForwardException(src.supertransformerlib.Core.Errors.ValidationError):
+class LinearForwardException(Core.Errors.ValidationError):
     """
     Called when catching an error during
     the forward phase
@@ -37,7 +38,7 @@ class LinearForwardException(src.supertransformerlib.Core.Errors.ValidationError
         super().__init__(typing, reason, task)
 
 
-class LinearCreationException(src.supertransformerlib.Core.Errors.ValidationError):
+class LinearCreationException(Core.Errors.ValidationError):
     """
     Called when something goes wrong on creating
     a linear layer.
@@ -50,7 +51,7 @@ class LinearCreationException(src.supertransformerlib.Core.Errors.ValidationErro
         super().__init__(typing, reason, task)
 
 
-class LinearFactoryException(src.supertransformerlib.Core.Errors.ValidationError):
+class LinearFactoryException(Core.Errors.ValidationError):
     """
     Called when something goes wrong when making
     the linear closure in the first place
@@ -108,7 +109,7 @@ class LinearClosure:
             Either move the layer or the tensor to a common dtype
             using .to(dtype)
             """
-            reason = src.supertransformerlib.Core.StringUtil.dedent(reason)
+            reason = Core.StringUtil.dedent(reason)
             raise LinearForwardException(reason, task)
         if tensor.device != self.kernel.device:
             tensor_device = tensor.device
@@ -123,7 +124,7 @@ class LinearClosure:
             device using .to(device)
             
             """
-            reason = src.supertransformerlib.Core.StringUtil.dedent(reason)
+            reason = Core.StringUtil.dedent(reason)
             raise LinearForwardException(reason, task)
 
     def validate_matmul(self, tensor: torch.Tensor, task: Optional[str]):
@@ -136,7 +137,7 @@ class LinearClosure:
             size {tensor_dim_size}. However, the process was initialized
             with an input width of {kernel_dim_size}
             """
-            reason = src.supertransformerlib.Core.StringUtil.dedent(reason)
+            reason = Core.StringUtil.dedent(reason)
             raise LinearForwardException(reason, task)
 
         if tensor.dim() < self.kernel.dim() - 1:
@@ -169,7 +170,7 @@ class LinearClosure:
             Modify the tensor to match, or the parallel dimensions
             to match.
             """
-            reason = src.supertransformerlib.Core.StringUtil.dedent(reason)
+            reason = Core.StringUtil.dedent(reason)
             raise LinearForwardException(reason, task)
 
     def __init__(self,
@@ -236,7 +237,7 @@ def make_kernel(input_shape: torch.Tensor,
                 parallel: Optional[torch.Tensor],
                 dynamic: Optional[torch.Tensor],
                 device: Optional[torch.device],
-                dtype: Optional[torch.dtype]) -> torch.Tensor:
+                dtype: Optional[torch.dtype]) -> Core.Parameter:
     """
     Makes the required kernel usable for performing
     linear operations in a particular situation.
@@ -257,20 +258,17 @@ def make_kernel(input_shape: torch.Tensor,
     shape = torch.concat([matrix_rows, matrix_columns])
     if parallel is not None:
         shape = torch.concat([parallel, shape])
-    if dynamic is not None:
-        shape = torch.concat([dynamic, shape])
 
-    shape = torch.Size(shape)
-    kernel = torch.empty(shape, device=device, dtype=dtype)
-    torch.nn.init.xavier_uniform_(kernel)
-    return kernel
+    init = torch.nn.init.kaiming_uniform_
+    parameter = Core.Parameter(init, shape, dynamic, dtype=dtype, device=device)
+    return parameter
 
 
 def make_bias(output_shape: torch.Tensor,
               parallel: Optional[torch.Tensor],
               dynamic: Optional[torch.Tensor],
               device: Optional[torch.device],
-              dtype: Optional[torch.dtype]) -> torch.Tensor:
+              dtype: Optional[torch.dtype]) -> Core.Parameter:
     """
     Makes the required bias usable for performing
     linear operations in a particular situation.
@@ -289,116 +287,10 @@ def make_bias(output_shape: torch.Tensor,
     shape = matrix_columns
     if parallel is not None:
         shape = torch.concat([parallel, shape])
-    if dynamic is not None:
-        shape = torch.concat([dynamic, shape])
 
-    shape = torch.Size(shape)
-    bias = torch.empty(shape, device=device, dtype=dtype)
-    torch.nn.init.zeros_(bias)
-    return bias
-
-
-def make_dense_superposition(dynamics: torch.Tensor,
-                             kernel: torch.Tensor,
-                             shape: torch.Tensor) -> torch.Tensor:
-    """
-    Makes a superposition of the kernel out of the dynamics weights
-    """
-
-    length = shape.shape[0]
-    dynamics = dynamics.flatten(0, length-1)
-    reduction_location = 0
-    kernel = kernel.flatten(0, length - 1)
-    for _ in range(kernel.dim() - 1):
-        dynamics = dynamics.unsqueeze(-1)
-    while kernel.dim() < dynamics.dim():
-        kernel = kernel.unsqueeze(1)
-
-    weighted_kernel = dynamics * kernel
-    superimposed_kernel = weighted_kernel.sum(dim=reduction_location)
-    return superimposed_kernel
-
-
-torch.jit.script(make_dense_superposition)
-
-
-def make_sparse_superposition(dynamics: torch.Tensor,
-                              kernel: torch.Tensor,
-                              shape: torch.Tensor):
-    """
-    Make a superposition out of the kernel when the dynamic
-    weights are sparse. The ones which are not present are
-    ignored.
-
-    :param dynamics: The dynamic kernel. Expected to be sparse
-    :param kernel: The kernel.
-    :param shape: The dynamic dynamic_shape. Note that due to hybrid tensor restrictions the dynamic_shape should
-        come as [...dynamic_shape, ...batch_shape], since sparse dimensions must remain sparse.
-    :return: The superimposed kernel
-    """
-
-    # Flatten the tensors so that the dynamic dimensions are
-    # found in one lump sum.
-
-    length = shape.shape[0]
-    input_shape = shape
-    output_shape = torch.tensor([int(shape.prod())])
-    dynamics = Reshape.reshape(dynamics, input_shape, output_shape, task="flattening sparse dynamic tensor")
-    kernel = kernel.flatten(0, length - 1)
-
-    # Resize the dynamic dimensions. expand the values where needed so
-    # sparse mask will not throw a fit. Use memory efficient expansion
-
-    dynamics_shape = dynamics.shape
-    kernel_shape = kernel.shape
-
-    dynamic_values = dynamics.values()
-    dynamic_expansion = [-1] * dynamic_values.dim()
-    dynamic_update_shape = list(dynamics_shape)
-
-    for dim in kernel_shape[1:]:
-        dynamic_expansion.append(dim)
-        dynamic_update_shape.append(dim)
-        dynamic_values = dynamic_values.unsqueeze(-1)
-
-    dynamic_values = dynamic_values.expand(dynamic_expansion)
-    dynamics = torch.sparse_coo_tensor(dynamics.indices(), dynamic_values, size=dynamic_update_shape)
-
-    # Resize the kernel dimension so that they have the same
-    # dynamic_shape.
-
-    kernel_expansion = [-1] * len(kernel_shape)
-    for i, dim in enumerate(dynamics_shape[1:]):
-        kernel_expansion.insert(i + 1, dim)
-        kernel = kernel.unsqueeze(1)
-    kernel = kernel.expand(kernel_expansion)
-
-    # Perform kernel mask, then add and sum resulting in
-    # a weighted superposition.
-
-    dynamics = dynamics.coalesce()
-    kernel = kernel.sparse_mask(dynamics)
-
-    weighted_kernel = kernel * dynamics
-
-    # The following sum is utilized due to the fact that torch.sparse.sum
-    # is broken under torchscript. It would have had to of been compiled
-    # on location to be useful.
-    superimposed_kernel = torch._sparse_sum(weighted_kernel, 0) #noqa
-    return superimposed_kernel
-
-def make_superposition(dynamic: torch.Tensor,
-                       kernel: torch.Tensor,
-                       shape: torch.Tensor):
-    """
-    Makes a superposition given the provided
-    dynamic spec and kernel.
-    """
-
-    if dynamic.is_sparse:
-        return make_sparse_superposition(dynamic, kernel, shape)
-    else:
-        return make_dense_superposition(dynamic, kernel, shape)
+    init = torch.nn.init.zeros_
+    parameter = Core.Parameter(init, shape, dynamic, dtype=dtype, device=device)
+    return parameter
 
 
 class Linear(nn.Module):
@@ -599,51 +491,6 @@ class Linear(nn.Module):
 
     """
     ClosureType = LinearClosure
-    def validate_dynamic(self,
-                         dynamic: torch.Tensor,
-                         shape: torch.Tensor,
-                         task: Optional[str]):
-        """
-        Validates that the dynamic tensor is configured correctly, in whatever
-        format it may come in.
-        """
-
-        dynamic_dim = dynamic.dim()
-        shape_dim = shape.shape[0]
-        if dynamic_dim < shape_dim:
-            reason = f"""\
-            The provided dynamic weights tensor had insufficient rank to 
-            successfully apply dynamic construction. The tensor was found
-            to have a rank of {dynamic_dim}, while the required number
-            of dimensions were {shape_dim}
-            """
-            reason = src.supertransformerlib.Core.StringUtil.dedent(reason)
-            raise LinearFactoryException(reason, task)
-
-        shape_as_list: List[int] = shape.tolist()
-        if dynamic.shape[:shape_dim] != torch.Size(shape_as_list):
-            dynamic_shape = dynamic.shape[:shape_dim]
-
-            reason = f"""\
-            The provided dynamics tensor does not properly match
-            the dynamic_shape of the defined dynamic kernel and thus
-            cannot be assembled. It was expected to start with
-            dynamic_shape {torch.Size(shape)}, but what was actually 
-            found was a tensor with dynamic_shape {dynamic_shape}            
-            """
-            reason = src.supertransformerlib.Core.StringUtil.dedent(reason)
-            raise LinearFactoryException(reason, task)
-        if dynamic.is_sparse and dynamic.sparse_dim() != shape_dim:
-            reason = f"""\
-            The provided dynamic tensor is a sparse hybrid tensor
-            of invalid nature. Due to the defined kernel, sparse
-            hybrid tensors must have sparse rank of {shape_dim}
-            however found {dynamic.sparse_dim()}
-            """
-            reason = src.supertransformerlib.Core.StringUtil.dedent(reason)
-            raise LinearFactoryException(reason, task)
-
-
     def __init__(self,
                  input_shape: src.supertransformerlib.Core.Functions.StandardShapeType,
                  output_shape: src.supertransformerlib.Core.Functions.StandardShapeType,
@@ -688,60 +535,29 @@ class Linear(nn.Module):
         self.input_map = Reshape.ReshapeFactory(input_shape, input_shape.prod().unsqueeze(-1))
         self.output_map = Reshape.ReshapeFactory(output_shape.prod().unsqueeze(-1), output_shape)
 
-        kernel = make_kernel(input_shape, output_shape, parallel, dynamic, device, dtype)
-        self.kernel = nn.Parameter(kernel)
-
+        self.kernel = make_kernel(input_shape, output_shape, parallel, dynamic, device, dtype)
         if use_bias:
-            bias = make_bias(output_shape, parallel, dynamic, device, dtype)
-            self.bias = bias
+            self.bias = make_bias(output_shape, parallel, dynamic, device, dtype)
         else:
             self.bias = None
 
-    def forward(self, dynamic: Optional[torch.Tensor] = None, task: Optional[str] = None) -> LinearClosure:
+    def forward(self, dynamic: Optional[torch.Tensor] = None, task: Optional[str] = "Building Linear Superposition") -> LinearClosure:
         """
         The factory method for getting the linear closure which can
         then be utilized to apply the linear mechanism. Depending on the
         configuration, either requires no tensor, or a tensor of dynamic
         weights.
 
-        :param dynamic:
+        :param dynamic: Details about the
         :param task:
         :return:
         """
 
-        if self.dynamic is None and dynamic is not None:
-            reason = f"""\
-            Factory was called with non-None dynamic, but layer 
-            was defined with no dynamic dimensions
-            """
-            reason = src.supertransformerlib.Core.StringUtil.dedent(reason)
-            raise LinearFactoryException(reason, task)
-        if self.dynamic is not None and dynamic is None:
-            reason = f"""\
-            Factory was called without a dynamic, but
-            it is the case that the linear layer is defined
-            with dynamic dimensions
-            """
-            reason = src.supertransformerlib.Core.StringUtil.dedent(reason)
-            raise LinearFactoryException(reason, task)
-
-        dynamic_shape = self.dynamic # Must copy line into local memory or torchscript throws a fit when refining types.
-        if dynamic_shape is not None and dynamic is not None:
-            torch.jit.annotate(torch.Tensor, dynamic)
-            self.validate_dynamic(dynamic, dynamic_shape, task)
-
-            matrix = self.kernel
-            matrix = make_superposition(dynamic, matrix, dynamic_shape)
-
-            bias = self.bias
-            if bias is not None:
-                bias = make_superposition(dynamic, bias, dynamic_shape)
-            else:
-                bias = None
-
+        matrix = self.kernel(dynamic, "dynamic", task)
+        if self.bias is not None:
+            bias = self.bias(dynamic, "dynamic", task)
         else:
-            matrix = self.kernel
-            bias = self.bias
+            bias = None
 
         input_map = self.input_map()
         output_map = self.output_map()

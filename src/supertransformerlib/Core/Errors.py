@@ -12,8 +12,8 @@ class ValidationError(Exception):
                  ):
 
         msg = ""
-        msg += "A validation error occurred: %s \n" % type
-        msg += "The error occurred because: \n\n %s\n" %reason
+        msg += "A %s error occurred \n" % type
+        msg += "The error occurred because: \n\n %s\n" % reason
         if task is not None:
             msg += "This happened while doing: \n %s" % task
         super().__init__(msg)

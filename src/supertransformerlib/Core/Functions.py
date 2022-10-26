@@ -127,7 +127,7 @@ def validate_string_in_options(string: str,
         raise ValueError(msg)
 
 
-def convert_shape(shape: torch.Tensor)->List[int]:
+def shape_to_List(shape: torch.Tensor)->List[int]:
     """
     Small function to turn shape from tensor into list format.
     Useful for torchscript, as torch.Size won't take a tensor
@@ -136,4 +136,4 @@ def convert_shape(shape: torch.Tensor)->List[int]:
     output: List[int] = shape.tolist()
     return output
 
-torch.jit.script(convert_shape)
+torch.jit.script(shape_to_List)

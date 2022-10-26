@@ -5,7 +5,7 @@ from torch import nn
 from src.supertransformerlib import Glimpses
 from src.supertransformerlib.Basics import Linear
 from src.supertransformerlib.Core import SparseUtils
-
+from src.supertransformerlib import Core
 print_errors = True
 
 class testForwardWithBias(unittest.TestCase):
@@ -222,22 +222,22 @@ class testBiasConstruct(unittest.TestCase):
     def test_basic_sane(self):
         """Test kernel maker is making something sane"""
         output_shape = torch.tensor(5)
-        parallel = torch.empty([0], dtype=torch.int64)
-        dynamic = torch.empty([0],dtype=torch.int64)
+        parallel = None
+        dynamic = None
         expected_shape = torch.Size([5])
 
-        kernel = Linear.make_bias(output_shape, parallel, dynamic, None, None)
-        self.assertTrue(kernel.shape == expected_shape)
+        Parameter = Linear.make_bias(output_shape, parallel, dynamic, None, None)
+        self.assertTrue(torch.Size(Parameter.Kernel_Shape) == expected_shape)
 
     def test_complicated(self):
         """Test that initialization works when far more complicated."""
         output_shape = torch.tensor(5)
         parallel = torch.tensor([3, 4])
         dynamic = torch.tensor([6, 7])
-        expected_shape = torch.Size([6, 7, 3, 4, 5])
+        expected_shape = torch.Size([3, 4, 5])
 
-        kernel = Linear.make_bias(output_shape, parallel, dynamic, None, None)
-        self.assertTrue(kernel.shape == expected_shape)
+        Parameter = Linear.make_bias(output_shape, parallel, dynamic, None, None)
+        self.assertTrue(torch.Size(Parameter.Kernel_Shape) == expected_shape)
 
 
 class testLinearErrors(unittest.TestCase):
@@ -247,7 +247,7 @@ class testLinearErrors(unittest.TestCase):
         try:
             layer()
             raise RuntimeError("Did not throw")
-        except Linear.LinearFactoryException as err:
+        except Core.KernelSetupError as err:
             if print_errors:
                 print(err)
 
@@ -257,7 +257,7 @@ class testLinearErrors(unittest.TestCase):
         try:
             layer(torch.randn([20]))
             raise RuntimeError("Did not throw")
-        except Linear.LinearFactoryException as err:
+        except Core.KernelSetupError as err:
             if print_errors:
                 print(err)
 
@@ -269,7 +269,7 @@ class testLinearErrors(unittest.TestCase):
         try:
             layer(dynamic)
             raise RuntimeError("Did not throw")
-        except Linear.LinearFactoryException as err:
+        except Core.KernelSetupError as err:
             if print_errors:
                 print(err)
 
@@ -281,7 +281,7 @@ class testLinearErrors(unittest.TestCase):
         try:
             layer(dynamic)
             raise RuntimeError("Did not throw")
-        except Linear.LinearFactoryException as err:
+        except Core.KernelSetupError as err:
             if print_errors:
                 print(err)
 

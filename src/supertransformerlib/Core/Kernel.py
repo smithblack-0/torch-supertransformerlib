@@ -171,7 +171,10 @@ class Parameter(nn.Module):
         self.Parameter = parameter
 
 
-    def forward(self, superposition_weights: Optional[torch.Tensor] = None, task: Optional[str] = None):
+    def forward(self,
+                superposition_weights: Optional[torch.Tensor] = None,
+                weights_name: Optional[str] = "superposition_weights",
+                task: Optional[str] = None):
 
         if self.Superposition_Shape is None:
             # Boring case.
@@ -181,10 +184,13 @@ class Parameter(nn.Module):
             if superposition_weights is not None:
                 reason = f"""\
                 The kernel was defined with no superposition dimensions.
+                However, it is the case parameter '{weights_name}' was provided 
+                with something during the forward call. To prevent hard to debug errors,
+                this is not allowed.
                 
-                However, it is the case a superposition weight was provided
-                on construction. This is not allowed
+                Either stop passing in a weights tensor, or define a superposition shape. 
                 """
+                reason = StringUtil.dedent(reason)
                 raise KernelSetupError(reason, task, superposition_weights, self.Parameter)
             return self.Parameter
 
@@ -196,9 +202,10 @@ class Parameter(nn.Module):
 
             if superposition_weights is None:
                 reason = f"""\
-                The kernel is being built with a superposition weight
-                of dynamic_shape {self.Superposition_Shape}. However, it is in
-                fact the case that no superposition weights were provided.
+                The Parameter is being built while defined to have a superposition
+                shape of {self.Superposition_Shape}. However, it is in
+                fact the case that no parameter '{weights_name}' was
+                provided when forward was called.
                 
                 This is not allowed.
                 """
@@ -206,8 +213,9 @@ class Parameter(nn.Module):
                 raise KernelSetupError(reason, task, superposition_weights, self.Parameter)
 
             interesting_length = self.Superposition_Shape.shape[0]
-            if superposition_weights.shape[:interesting_length] != torch.Size(self.Superposition_Shape):
-                if superposition_weights.shape[-interesting_length:] == torch.Size(self.Superposition_Shape):
+            size = torch.Size(Functions.shape_to_List(self.Superposition_Shape))
+            if superposition_weights.shape[:interesting_length] != size:
+                if superposition_weights.shape[-interesting_length:] == size:
                     front = torch.tensor(superposition_weights.shape[:-interesting_length], dtype=torch.int64)
                     back = torch.tensor(superposition_weights.shape[-interesting_length:], dtype=torch.int64)
                     right_shape = torch.Size(torch.concat([back, front], dim=0))
@@ -217,7 +225,7 @@ class Parameter(nn.Module):
                     hybrid tensors, it is the case batch dimensions need to be placed after
                     the weight dimensions. 
                     
-                    You provided a tensor 'superposition_weights' of shape {torch.Size(superposition_weights.shape)} which
+                    You provided a tensor '{weights_name}' of shape {torch.Size(superposition_weights.shape)} which
                     is attempting to build the superposition defined by {torch.Size(self.Superposition_Shape)}. However, 
                     it is the case that the tensor should have in fact had a shape of {right_shape}. That is, 
                     the superposition should have been defined, then the batch elements. 
@@ -233,7 +241,7 @@ class Parameter(nn.Module):
                     reason = f"""\
                     The kernel is being built with an expected weight dynamic_shape 
                     of {torch.Size(self.Superposition_Shape)}. However, it is the 
-                    the case provided parameter 'superposition_weights' under the forward
+                    the case provided parameter '{weights_name}' under the forward
                     call had a size of {superposition_weights.shape}.
                     
                     Since these do not match, kernel construction failed
@@ -247,7 +255,8 @@ class Parameter(nn.Module):
                 superposition weights had a dtype of {superposition_weights.dtype}
                 
                 Since these are not the same, kernel construction failed. Use
-                Tensor.to(dtype) to fix this
+                Tensor.to(dtype={self.Parameter.dtype}) to fix this, but make 
+                sure you are not passing in the wrong tensor first!
                 """
                 reason = StringUtil.dedent(reason)
                 raise KernelSetupError(reason, task, superposition_weights, self.Parameter)
@@ -255,12 +264,13 @@ class Parameter(nn.Module):
                 reason = f"""\
                 The kernel is being built under the assumption it is 
                 located on device {self.Parameter.device}. However, 
-                the superposition weights are instead located on device
+                the parameter {weights_name} are instead located on device
                 {superposition_weights.device}. 
                 
                 Since these are not the same, kernel construction failed.
                 
-                Use Tensor.to(device) to fix this
+                Use Tensor.to(device={self.Parameter.device}) to fix this,
+                but make sure you are passing in the right tensor first!
                 """
                 reason = StringUtil.dedent(reason)
                 raise KernelSetupError(reason, task, superposition_weights, self.Parameter)

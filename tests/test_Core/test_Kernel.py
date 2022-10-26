@@ -5,7 +5,13 @@ from torch.nn import init
 
 from src.supertransformerlib.Core import Kernel
 from src.supertransformerlib.Core import SparseUtils
+from src.supertransformerlib import Core
 
+print_errors = True
+
+def print_the_error(error):
+    print("--- printing a caught error for message inspection. See following ---")
+    print(error)
 
 class testKernelSuperposition(unittest.TestCase):
     """
@@ -89,7 +95,21 @@ class test_Parameter(unittest.TestCase):
         self.assertTrue(torch.Size(shape) == output.shape)
 
     def test_make_superposition_parameter_dense(self):
+        """ test we can build a superposition using a dense spec"""
+        shape = [20, 30, 10]
+        superposition = [10, 7]
+        weights = torch.rand([10, 7])
+        func = init.kaiming_uniform_
 
+
+        expected_shape = torch.Size([20, 30, 10])
+        layer = Kernel.Parameter(func, shape, superposition)
+        layer = torch.jit.script(layer)
+        output = layer(weights)
+        self.assertTrue(expected_shape == output.shape)
+
+    def test_make_batched_dense_superposition(self):
+        """ test we can build a batched superposition using a dense spec"""
         shape = [20, 30, 10]
         superposition = [10, 7]
         weights = torch.rand([10, 7, 5])
@@ -103,68 +123,129 @@ class test_Parameter(unittest.TestCase):
         self.assertTrue(expected_shape == output.shape)
 
     def test_make_superposition_parameter_sparse(self):
-
+        """ Test we can build a batched superposition with a sparse unbatched spec."""
         shape = [20, 30, 10]
         superposition = [10, 10]
+        func = init.kaiming_uniform_
 
         weights = torch.rand([10, 10])
         mask = weights > 0.5
         weights = weights*mask
-        weights = weights.to_sparse_coo()
+        weights = weights.to_sparse()
 
-        mode = "sparse"
+
+        expected_shape = torch.Size([20, 30, 10])
+        layer = Kernel.Parameter(func, shape, superposition)
+        layer = torch.jit.script(layer)
+        output = layer(weights)
+        self.assertTrue(output.shape == expected_shape)
+
+    def test_sparse_batched(self):
+        """ Test the superposition system still works properly when using a batched hybrid tensor"""
+        shape = [20, 30, 10]
+        superposition = [10, 5]
+        func = init.kaiming_uniform_
+
+        weights = torch.rand([10, 5, 7])
+        mask = torch.rand([10, 5]) > 0.5
+        weights = Core.SparseUtils.convert_dense_to_hybrid(weights, mask)
+
+        expected_shape = torch.Size([7, 20, 30, 10])
+        layer = Kernel.Parameter(func, shape, superposition)
+        layer = torch.jit.script(layer)
+        output = layer(weights)
+        self.assertTrue(output.shape == expected_shape)
 
     def test_different_dtype(self):
-
+        """ Test that all is well when a different dtype is specified"""
         shape = [20, 30, 10]
-        superposition = None
+        superposition = [10, 7]
+        weights = torch.rand([10, 7])
+        func = init.kaiming_uniform_
         dtype = torch.float64
 
+        expected_shape = torch.Size([20, 30, 10])
+        layer = Kernel.Parameter(func, shape, superposition, dtype=dtype)
+        layer = torch.jit.script(layer)
+        output = layer(weights.to(dtype=dtype))
+        self.assertTrue(expected_shape == output.shape)
+        self.assertTrue(output.dtype == dtype)
 
 
-class test_Parameter_Call_Errors(unittest.TestCase):
+class test_Call_Errors(unittest.TestCase):
     """
     Tests errors are being thrown when appropriate
     """
-    def test_not_called_with_weights(self):
+    def test_not_called_with_weights_when_needed(self):
         shape = [20, 30, 10]
         superposition = [10, 10]
+        func = init.kaiming_uniform_
+
+        try:
+            layer = Kernel.Parameter(func, shape, superposition)
+            param = layer()
+            raise RuntimeError("Did not throw when required")
+        except Kernel.KernelSetupError as err:
+            if print_errors:
+                print_the_error(err)
+
 
     def test_called_with_weights_when_not_needed(self):
 
         shape = [20, 30, 10]
-        superposition = None
         weights = torch.rand([10, 10])
+        func = init.kaiming_uniform_
+
+        try:
+            layer = Kernel.Parameter(func, shape)
+            parameter = layer(weights)
+            raise RuntimeError("Did not throw when expected")
+        except Kernel.KernelSetupError as err:
+            if print_errors:
+                print_the_error(err)
 
     def test_weights_wrong_shape(self):
 
         shape = [20, 30, 10]
         superposition = [10, 10]
         weights = torch.rand([10])
-        mode = "dense"
+        func = torch.nn.init.kaiming_uniform_
 
-    def test_weights_sparse_when_should_be_dense(self):
+        try:
+            layer = Kernel.Parameter(func, shape, superposition)
+            output = layer(weights)
+            raise RuntimeError("Did not throw when expected")
+        except Kernel.KernelSetupError as err:
+            if print_errors:
+                print_the_error(err)
+
+    def test_weights_almost_correct(self):
+        """ test the common case where batch dimensions are not put last. """
         shape = [20, 30, 10]
         superposition = [10, 10]
+        weights = torch.rand([5, 10, 10])
+        func = torch.nn.init.kaiming_uniform_
 
-        weights = torch.rand([10, 10])
-        mask = weights > 0.5
-        weights = weights*mask
-        weights = weights.to_sparse_coo()
+        try:
+            layer = Kernel.Parameter(func, shape, superposition)
+            output = layer(weights)
+            raise RuntimeError("Did not throw when expected")
+        except Kernel.KernelSetupError as err:
+            if print_errors:
+                print_the_error(err)
 
-        mode = "dense"
-
-    def test_weights_dense_when_should_be_sparse(self):
-        shape = [20, 30, 10]
-        superposition = [10, 10]
-        weights = torch.rand([10, 10])
-        mode = "sparse"
 
     def test_weights_bad_dtype(self):
 
         shape = [20, 30, 10]
         superposition = [10, 10]
-        weights = torch.rand([10, 10]).to(dtype=torch.int64)
-        mode = "dense"
+        weights = torch.rand([10, 10, 5]).to(dtype=torch.int64)
+        func = torch.nn.init.kaiming_uniform_
 
-    
+        try:
+            layer = Kernel.Parameter(func, shape, superposition)
+            output = layer(weights)
+            raise RuntimeError("Did not throw when expected")
+        except Kernel.KernelSetupError as err:
+            if print_errors:
+                print_the_error(err)
