@@ -81,11 +81,11 @@ class FeedForward(nn.Module):
     and allows execution of a kernel across an entire tensor
     independently and in parallel.
 
-    Long story short, the shape you place here will be
+    Long story short, the dynamic_shape you place here will be
     added onto the deployed kernels, such that a problem
-    with a tensor of shape (..., 20, 128) with
+    with a tensor of dynamic_shape (..., 20, 128) with
     parallelization (10, 15) will require a tensor
-    of shape (..., 10, 15, 20, 128) and process each
+    of dynamic_shape (..., 10, 15, 20, 128) and process each
     defined dimensions with completely independent parameters
 
     --- config ---
@@ -168,10 +168,10 @@ class _MultiHeadedAttention_Forward:
         """
 
 
-        :param query: The query. Of shape (...,(dynamic), (...parallel), items, embedding)
-        :param key: The key, Of shape (..., (dynamic), (...parallel), content_items, embedding)
-        :param value: The value. Of shape, (..., (dynamic), (...parallel), content_items, embedding)
-        :param mask: A bool mask. True masks. Optional. Of shape (..., (ensemble), items, content_items)
+        :param query: The query. Of dynamic_shape (...,(dynamic), (...parallel), items, embedding)
+        :param key: The key, Of dynamic_shape (..., (dynamic), (...parallel), content_items, embedding)
+        :param value: The value. Of dynamic_shape, (..., (dynamic), (...parallel), content_items, embedding)
+        :param mask: A bool mask. True masks. Optional. Of dynamic_shape (..., (ensemble), items, content_items)
         :return: tensor. Attention result
         """
 
@@ -217,11 +217,11 @@ class MultiHeadedAttention(nn.Module):
     and allows execution of a kernel across an entire tensor
     independently and in parallel.
 
-    Long story short, the shape you place here will be
+    Long story short, the dynamic_shape you place here will be
     added onto the deployed kernels, such that a problem
-    with a tensor of shape (..., 20, 128) with
+    with a tensor of dynamic_shape (..., 20, 128) with
     parallelization (10, 15) will require a tensor
-    of shape (..., 10, 15, 20, 128) and process each
+    of dynamic_shape (..., 10, 15, 20, 128) and process each
     defined dimensions with completely independent parameters
 
 
@@ -241,7 +241,7 @@ class MultiHeadedAttention(nn.Module):
         :param d_content: The dimensions of the contents embedding
         :param d_output: The output embedding
         :param heads: The number of heads to initialize the MHA with.
-        :param parallelization: How much, and in what shape, to parallelize. Static.
+        :param parallelization: How much, and in what dynamic_shape, to parallelize. Static.
         :param dynamics: Whether or not to setup extra kernelspace for dynamic configuration.
         """
 
@@ -278,10 +278,10 @@ class MultiHeadedAttention(nn.Module):
         """
 
 
-        :param query: The query. Of shape (...,(dynamic), (...parallel), items, embedding)
-        :param key: The key, Of shape (..., (dynamic), (...parallel), content_items, embedding)
-        :param value: The value. Of shape, (..., (dynamic), (...parallel), content_items, embedding)
-        :param mask: A bool mask. True masks. Optional. Of shape (..., (ensemble), items, content_items)
+        :param query: The query. Of dynamic_shape (...,(dynamic), (...parallel), items, embedding)
+        :param key: The key, Of dynamic_shape (..., (dynamic), (...parallel), content_items, embedding)
+        :param value: The value. Of dynamic_shape, (..., (dynamic), (...parallel), content_items, embedding)
+        :param mask: A bool mask. True masks. Optional. Of dynamic_shape (..., (ensemble), items, content_items)
         :return: tensor. Attention result
         """
         forward_call = self.setup_forward()
@@ -377,7 +377,7 @@ class PIMU(nn.Module):
         assert d_model % heads == 0
 
         head_channel_width = d_model // heads
-        # Construct kernel shape
+        # Construct kernel dynamic_shape
 
         kernel_shape: List[int] = []
         kernel_shape = [heads, mem_width, head_channel_width] + kernel_shape
@@ -571,7 +571,7 @@ class LCSA(nn.Module):
         :param kernel_width: How wide the local kernel shall be
         :param dilations: A specification for how to dilate each head. The length of this
             determines the number of heads.
-        :param parallelization: How, and in what shape, to perform parallel kernel operations
+        :param parallelization: How, and in what dynamic_shape, to perform parallel kernel operations
         :param dynamics: Whether or not, and how large, to make the dynamic kernel ability.
         :param  mode: controls how the padding is constructed. "forward", "center", "backward" are the
             options. forward only knows about prior words, center about words to the front and back,

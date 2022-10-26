@@ -28,7 +28,7 @@ def local(tensor: torch.Tensor,
     a convolution. The name "local" is due to the fact that the kernels generated are inherently a
     somewhat local phenomenon.
 
-    When calling this function, a series of kernels with shape determined by dilation_rate and kernel_width,
+    When calling this function, a series of kernels with dynamic_shape determined by dilation_rate and kernel_width,
     and with number determined by stride_rate, will be generated along the last dimension of the input tensor.
     The output will be a tensor with an additional dimension on the end, with width equal to the size of
     the kernel, and the second-to-last dimension then indices these kernels.
@@ -55,7 +55,7 @@ def local(tensor: torch.Tensor,
     assert start_offset >= 0
     assert end_offset >= 0
 
-    # Construct shape. Take into account the kernel_width, dilation rate, and stride rate.
+    # Construct dynamic_shape. Take into account the kernel_width, dilation rate, and stride rate.
 
     # The kernel width, and dilation rate, together modifies how far off the end of the
     # data buffer a naive implimentation would go, in an additive manner. Striding, meanwhile
@@ -113,7 +113,7 @@ def dilocal(tensor: torch.Tensor,
     :param pad_to_input_size: Whether or not to ensure the output is as wide as the input.
     :param pad_value: What to pad with.
     :param pad_justification: May be "forward", "center", or "backward".
-    :return: tensor. Has shape (dilations, items, kernel_width).
+    :return: tensor. Has dynamic_shape (dilations, items, kernel_width).
     """
     assert isinstance(kernel_width, int)
     assert isinstance(stride_rate, int)

@@ -7,6 +7,9 @@ import unittest
 from typing import Type
 
 import torch
+
+import src.supertransformerlib.Core.Errors
+import src.supertransformerlib.Core.Functions
 from src.supertransformerlib import Glimpses, Core
 from src.supertransformerlib.Core import Reshape
 from torch.nn import functional
@@ -30,11 +33,11 @@ class testfunctionreshape(unittest.TestCase):
 
 
         def should_succeed(tensor: torch.Tensor,
-                                input_shape: Core.StandardShapeType,
-                                output_shape: Core.StandardShapeType,
-                                expected_shape: torch.Size,
-                                validation=True,
-                                task=None):
+                           input_shape: src.supertransformerlib.Core.Functions.StandardShapeType,
+                           output_shape: src.supertransformerlib.Core.Functions.StandardShapeType,
+                           expected_shape: torch.Size,
+                           validation=True,
+                           task=None):
             output = Glimpses.reshape(tensor, input_shape, output_shape, validation, task)
             self.assertTrue(output.shape == expected_shape)
 
@@ -55,9 +58,9 @@ class testfunctionreshape(unittest.TestCase):
 
 
         def should_fail(tensor: torch.Tensor,
-                                input_shape: Core.StandardShapeType,
-                                output_shape: Core.StandardShapeType,
-                                expected_failure_type: Type[Exception]):
+                        input_shape: src.supertransformerlib.Core.Functions.StandardShapeType,
+                        output_shape: src.supertransformerlib.Core.Functions.StandardShapeType,
+                        expected_failure_type: Type[Exception]):
 
 
             try:
@@ -71,7 +74,7 @@ class testfunctionreshape(unittest.TestCase):
                     print(err)
 
         bad_element_num = (torch.randn([5]), 5, 3, Glimpses.ReshapeException)
-        bad_shape = (torch.randn([5]), [-5], [-5], Core.StandardizationError)
+        bad_shape = (torch.randn([5]), [-5], [-5], src.supertransformerlib.Core.Errors.StandardizationError)
         bad_dim_number = (torch.randn([5]), [3,6], 18, Glimpses.ReshapeException)
 
         should_fail(*bad_shape)

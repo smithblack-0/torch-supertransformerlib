@@ -10,14 +10,17 @@ prior elements, post elements, and offset.
 import torch
 from torch import nn
 from torch.nn import functional as F
-from src.supertransformerlib.Core import Core
+
+import src.supertransformerlib.Core.Errors
+import src.supertransformerlib.Core.Functions
+import src.supertransformerlib.Core.StringUtil
 from typing import Tuple, List, Optional
 
 
 # Not actually utilized, but manually impliments the process.
 # It is instead far more efficient to use as strided
 
-class ConvolutionalError(Core.ValidationError):
+class ConvolutionalError(src.supertransformerlib.Core.Errors.ValidationError):
     """
     An error to throw when convolution is going badly
     """
@@ -127,7 +130,7 @@ def native_local_sample(
     tensor index with regards to the nearby neighbors.
     """
 
-    # Calculate the new shape. This will be found by finding the
+    # Calculate the new dynamic_shape. This will be found by finding the
     # difference between the minimum and maximum stride numbers,
     # which are a representation from the start of theoredical
     # sampling to the end of where we actually find sane
@@ -210,7 +213,7 @@ def padded_local_sample(
     similar to the native sampling system, except
     locations which do not have a native view have
     the missing parts filled in by padding. As a result
-    the primary dimensions will retain the same shape.
+    the primary dimensions will retain the same dynamic_shape.
     """
 
     # We handle this problem by creating a new buffer containing a
@@ -243,12 +246,12 @@ def padded_local_sample(
     padding: List[int] = padding.tolist()
     buffer = F.pad(tensor, padding)
 
-    # Calculate the required shape. This involves looking at the
-    # current shape and dividing it by the stride then rounding down,
-    # and including this along with the static shape and local dims
+    # Calculate the required dynamic_shape. This involves looking at the
+    # current dynamic_shape and dividing it by the stride then rounding down,
+    # and including this along with the static dynamic_shape and local dims
     # enlarging the dimensions to account for the new locations.
     #
-    # Note that the update shape is the solution to
+    # Note that the update dynamic_shape is the solution to
     # stride(n -1) >= length - 1, solved for n.
 
     static_shape = torch.tensor(tensor.shape[:-local_lengths], dtype=torch.int64)
@@ -319,18 +322,18 @@ def local_sample(
     :param stride: The stride of the problem, along each dimension
     :param dilation: The dilation of the problem, along each dimension
     :param offset: The offset of the problem, along each dimension
-    :return: A tensor of the same shape, with one extra dimension. This extra dimension is generated
+    :return: A tensor of the same dynamic_shape, with one extra dimension. This extra dimension is generated
             by sampling the last N dimensions according to the provided kernel specifications, and
             concatenating all the samples together.
     """
 
     # Perform primary validation
 
-    start = Core.standardize_shape(start, 'start', True, True, task)
-    end = Core.standardize_shape(end, 'end', True, True, task)
-    stride = Core.standardize_shape(stride, 'stride', False, False, task)
-    dilation = Core.standardize_shape(dilation, 'dilation', False, False, task)
-    offset = Core.standardize_shape(offset, 'offset', True, True, task)
+    start = src.supertransformerlib.Core.Functions.standardize_shape(start, 'start', True, True, task)
+    end = src.supertransformerlib.Core.Functions.standardize_shape(end, 'end', True, True, task)
+    stride = src.supertransformerlib.Core.Functions.standardize_shape(stride, 'stride', False, False, task)
+    dilation = src.supertransformerlib.Core.Functions.standardize_shape(dilation, 'dilation', False, False, task)
+    offset = src.supertransformerlib.Core.Functions.standardize_shape(offset, 'offset', True, True, task)
 
     if start.shape[0] > tensor.dim():
         reason = f"""\
@@ -339,7 +342,7 @@ def local_sample(
         while the tensor only had rank {tensor.dim()}. This is not
         allowed.
         """
-        reason = Core.dedent(reason)
+        reason = src.supertransformerlib.Core.StringUtil.dedent(reason)
         raise ConvolutionalError(reason, task)
     if start.shape[0] != end.shape[0]:
         reason = f"""\
@@ -347,7 +350,7 @@ def local_sample(
         the same rank. 'start' has rank {start.shape[0]}
         while 'end' has rank {end.shape[0]}
         """
-        reason = Core.dedent(reason)
+        reason = src.supertransformerlib.Core.StringUtil.dedent(reason)
         raise ConvolutionalError(reason, task)
     if start.shape[0] != stride.shape[0]:
         reason = f"""\
@@ -355,7 +358,7 @@ def local_sample(
         same rank. 'start' has rank {start.shape[0]} while
         'stride' has rank {stride.shape[0]}
         """
-        reason = Core.dedent(reason)
+        reason = src.supertransformerlib.Core.StringUtil.dedent(reason)
         raise ConvolutionalError(reason, task)
     if start.shape[0] != dilation.shape[0]:
         reason = f"""\
@@ -363,7 +366,7 @@ def local_sample(
         the same rank. 'start' has rank {start.shape[0]} while
         'dilation' has rank {dilation.shape[0]}
         """
-        reason = Core.dedent(reason)
+        reason = src.supertransformerlib.Core.StringUtil.dedent(reason)
         raise ConvolutionalError(reason, task)
     if start.shape[0] != offset.shape[0]:
         reason = f"""\
@@ -371,14 +374,14 @@ def local_sample(
         same rank. 'start' had rank {start.shape[0]} while offset
         had rank {offset.shape[0]}
         """
-        reason = Core.dedent(reason)
+        reason = src.supertransformerlib.Core.StringUtil.dedent(reason)
         raise ConvolutionalError(reason, task)
     if torch.any(start > end):
         reason = f"""\
         Start nodes were higher than end nodes. This is not 
         allowed. 
         """
-        reason = Core.dedent(reason)
+        reason = src.supertransformerlib.Core.StringUtil.dedent(reason)
         raise ConvolutionalError(reason, task)
 
     if mode == "native":
@@ -405,7 +408,7 @@ def local(tensor: torch.Tensor,
     a convolution. The name "local" is due to the fact that the kernels generated are inherently a
     somewhat local phenomenon.
 
-    When calling this function, a series of kernels with shape determined by dilation_rate and kernel_width,
+    When calling this function, a series of kernels with dynamic_shape determined by dilation_rate and kernel_width,
     and with number determined by stride_rate, will be generated along the last dimension of the input tensor.
     The output will be a tensor with an additional dimension on the end, with width equal to the size of
     the kernel, and the second-to-last dimension then indices these kernels.
@@ -432,7 +435,7 @@ def local(tensor: torch.Tensor,
     assert start_offset >= 0
     assert end_offset >= 0
 
-    # Construct shape. Take into account the kernel_width, dilation rate, and stride rate.
+    # Construct dynamic_shape. Take into account the kernel_width, dilation rate, and stride rate.
 
     # The kernel width, and dilation rate, together modifies how far off the end of the
     # data buffer a naive implimentation would go, in an additive manner. Striding, meanwhile

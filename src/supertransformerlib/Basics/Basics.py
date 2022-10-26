@@ -7,7 +7,7 @@ import torch.jit
 from torch import nn
 
 from src.supertransformerlib import Glimpses
-from src.supertransformerlib.Core import standardize_shape
+from src.supertransformerlib.Core.Functions import standardize_shape
 
 
 @torch.jit.script
@@ -31,8 +31,8 @@ class ViewPoint:
 
         :param views: The number of views
         :param view_width: The view width
-        :param weights: The weights tensor. In shape [..., views, query, top_k]
-        :param index: The index tensor. In shape [..., views, query, top_k]
+        :param weights: The weights tensor. In dynamic_shape [..., views, query, top_k]
+        :param index: The index tensor. In dynamic_shape [..., views, query, top_k]
         """
         self.view_width = view_width
         self.views = views
@@ -55,7 +55,7 @@ class ViewPoint:
 
         #The following code sets up a gather
         #
-        #This consists of getting the index and strided source the same shape,
+        #This consists of getting the index and strided source the same dynamic_shape,
         #then using expand to ensure gather will select all required index.
         #
         #Gather basically expects, along each non-gathered dimension, a

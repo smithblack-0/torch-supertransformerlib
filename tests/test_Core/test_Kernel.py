@@ -1,6 +1,7 @@
 import unittest
 
 import torch
+from torch.nn import init
 
 from src.supertransformerlib.Core import Kernel
 from src.supertransformerlib.Core import SparseUtils
@@ -78,16 +79,28 @@ class test_Parameter(unittest.TestCase):
     Test the actual parameter manager itself.
     """
     def test_make_basic_parameter(self):
-
+        """ Test that a parameter with no superposition functions like normal"""
         shape = [20, 30, 10]
-        superposition = None
+        func = init.kaiming_uniform_
+
+        layer = Kernel.Parameter(func, shape)
+        layer = torch.jit.script(layer)
+        output = layer()
+        self.assertTrue(torch.Size(shape) == output.shape)
 
     def test_make_superposition_parameter_dense(self):
 
         shape = [20, 30, 10]
-        superposition = [10, 10]
-        weights = torch.rand([10, 10])
-        mode = "dense"
+        superposition = [10, 7]
+        weights = torch.rand([10, 7, 5])
+        func = init.kaiming_uniform_
+
+
+        expected_shape = torch.Size([5, 20, 30, 10])
+        layer = Kernel.Parameter(func, shape, superposition)
+        layer = torch.jit.script(layer)
+        output = layer(weights)
+        self.assertTrue(expected_shape == output.shape)
 
     def test_make_superposition_parameter_sparse(self):
 
@@ -107,12 +120,6 @@ class test_Parameter(unittest.TestCase):
         superposition = None
         dtype = torch.float64
 
-
-class test_Parameter_Construction_Errors(unittest.TestCase):
-    """
-    Tests errors are being thrown when appropriate
-    """
-    pass
 
 
 class test_Parameter_Call_Errors(unittest.TestCase):

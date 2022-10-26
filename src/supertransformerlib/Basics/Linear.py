@@ -14,13 +14,17 @@ three distinct steps. These are
 from typing import Optional, List
 
 import torch
+
+import src.supertransformerlib.Core.Errors
+import src.supertransformerlib.Core.Functions
+import src.supertransformerlib.Core.StringUtil
 from src.supertransformerlib.Core import Reshape
 from src.supertransformerlib import Core
 
 from torch import nn
 
 
-class LinearForwardException(Core.ValidationError):
+class LinearForwardException(src.supertransformerlib.Core.Errors.ValidationError):
     """
     Called when catching an error during
     the forward phase
@@ -33,7 +37,7 @@ class LinearForwardException(Core.ValidationError):
         super().__init__(typing, reason, task)
 
 
-class LinearCreationException(Core.ValidationError):
+class LinearCreationException(src.supertransformerlib.Core.Errors.ValidationError):
     """
     Called when something goes wrong on creating
     a linear layer.
@@ -46,7 +50,7 @@ class LinearCreationException(Core.ValidationError):
         super().__init__(typing, reason, task)
 
 
-class LinearFactoryException(Core.ValidationError):
+class LinearFactoryException(src.supertransformerlib.Core.Errors.ValidationError):
     """
     Called when something goes wrong when making
     the linear closure in the first place
@@ -104,7 +108,7 @@ class LinearClosure:
             Either move the layer or the tensor to a common dtype
             using .to(dtype)
             """
-            reason = Core.dedent(reason)
+            reason = src.supertransformerlib.Core.StringUtil.dedent(reason)
             raise LinearForwardException(reason, task)
         if tensor.device != self.kernel.device:
             tensor_device = tensor.device
@@ -119,7 +123,7 @@ class LinearClosure:
             device using .to(device)
             
             """
-            reason = Core.dedent(reason)
+            reason = src.supertransformerlib.Core.StringUtil.dedent(reason)
             raise LinearForwardException(reason, task)
 
     def validate_matmul(self, tensor: torch.Tensor, task: Optional[str]):
@@ -132,7 +136,7 @@ class LinearClosure:
             size {tensor_dim_size}. However, the process was initialized
             with an input width of {kernel_dim_size}
             """
-            reason = Core.dedent(reason)
+            reason = src.supertransformerlib.Core.StringUtil.dedent(reason)
             raise LinearForwardException(reason, task)
 
         if tensor.dim() < self.kernel.dim() - 1:
@@ -147,7 +151,7 @@ class LinearClosure:
                  Reduce the number of parallel kernel dimensions, or increase 
                  the rank of the tensor.
                  """
-            reason = Core.dedent(reason)
+            reason = src.supertransformerlib.Core.StringUtil.dedent(reason)
             raise LinearForwardException(reason, task)
 
         kernel_parallel_shape = self.kernel.shape[:-2]
@@ -155,17 +159,17 @@ class LinearClosure:
         tensor_parallel_shape = tensor.shape[-(1 + parallel_length):-1]
         if kernel_parallel_shape != tensor_parallel_shape:
             reason = f"""\
-            Tensor has incorrect shape for parallel linear
+            Tensor has incorrect dynamic_shape for parallel linear
             operation. The tensor was found to have a 
-            parallel shape of {tensor_parallel_shape}. 
+            parallel dynamic_shape of {tensor_parallel_shape}. 
             
             However, it is the case that the kernel was 
-            defined with parallel shape {kernel_parallel_shape}
+            defined with parallel dynamic_shape {kernel_parallel_shape}
             
             Modify the tensor to match, or the parallel dimensions
             to match.
             """
-            reason = Core.dedent(reason)
+            reason = src.supertransformerlib.Core.StringUtil.dedent(reason)
             raise LinearForwardException(reason, task)
 
     def __init__(self,
@@ -241,8 +245,8 @@ def make_kernel(input_shape: torch.Tensor,
     (dynamic_dims..., parallel_dims..., input_shape, output_shape)
 
 
-    :param input_shape: The expected input shape
-    :param output_shape: The expected output shape
+    :param input_shape: The expected input dynamic_shape
+    :param output_shape: The expected output dynamic_shape
     :param parallel: The number of parallel dimensions
     :param dynamic: The number of dynamic dimensions
     :return: The matmul kernel
@@ -275,7 +279,7 @@ def make_bias(output_shape: torch.Tensor,
     (dynamic_dims..., parallel_dims..., output_shape)
 
 
-    :param output_shape: The expected input shape
+    :param output_shape: The expected input dynamic_shape
     :param parallel: The number of parallel dimensions
     :param dynamic: The number of dynamic dimensions
     :return: The matmul kernel
@@ -328,8 +332,8 @@ def make_sparse_superposition(dynamics: torch.Tensor,
 
     :param dynamics: The dynamic kernel. Expected to be sparse
     :param kernel: The kernel.
-    :param shape: The dynamic shape. Note that due to hybrid tensor restrictions the shape should
-        come as [...shape, ...batch_shape], since sparse dimensions must remain sparse.
+    :param shape: The dynamic dynamic_shape. Note that due to hybrid tensor restrictions the dynamic_shape should
+        come as [...dynamic_shape, ...batch_shape], since sparse dimensions must remain sparse.
     :return: The superimposed kernel
     """
 
@@ -361,7 +365,7 @@ def make_sparse_superposition(dynamics: torch.Tensor,
     dynamics = torch.sparse_coo_tensor(dynamics.indices(), dynamic_values, size=dynamic_update_shape)
 
     # Resize the kernel dimension so that they have the same
-    # shape.
+    # dynamic_shape.
 
     kernel_expansion = [-1] * len(kernel_shape)
     for i, dim in enumerate(dynamics_shape[1:]):
@@ -407,7 +411,7 @@ class Linear(nn.Module):
     --- Usage ---
 
     This layer may be setup using information such as the
-    expected input shape, the expected output shape, and various
+    expected input dynamic_shape, the expected output dynamic_shape, and various
     additional modal information. Doing this will create a linear
     factory layer.
 
@@ -475,8 +479,8 @@ class Linear(nn.Module):
     It is the case one can define a projection to occur and the layer
     will automatically reshape to match.
 
-    For example, say you want to project a tensor with shape
-    [3, 5, 6] into a tensor with shape [3, 2]. This can be done
+    For example, say you want to project a tensor with dynamic_shape
+    [3, 5, 6] into a tensor with dynamic_shape [3, 2]. This can be done
     as:
 
     ```
@@ -534,20 +538,20 @@ class Linear(nn.Module):
     is to try all possibilities. This is the idea behind dynamic
     superposition.
 
-    You may define a kernelspace of arbitrary shape to be designated
+    You may define a kernelspace of arbitrary dynamic_shape to be designated
     "dynamic" and for which it is the case that weights will need
     to be provided. Notably, these weights need a little discussion.
     Unlike the parallel kernels, the dynamic dimensions must
     corrolate with the beginning of the tensor. That is, if you
     have dynamic dimensions of [12, 5], then your weight tensor
-    must start with shape [12, 5]. This is due to restrictions
+    must start with dynamic_shape [12, 5]. This is due to restrictions
     in how torch handles sparse hybrid tensors, which can be
     utilized for the process. The remaining dimensions after
     this should be whatever batch features are needed
 
     As an example, lets say we have a network of 12 dynamically
     configured layer that are configured per batch entry across
-    a batch of shape [7, 7]. The linear operation should map
+    a batch of dynamic_shape [7, 7]. The linear operation should map
     from size 5 to size 6. The layer should first
     setup a configuration, then generate a dynamic superposition
     and execute linear.
@@ -613,7 +617,7 @@ class Linear(nn.Module):
             to have a rank of {dynamic_dim}, while the required number
             of dimensions were {shape_dim}
             """
-            reason = Core.dedent(reason)
+            reason = src.supertransformerlib.Core.StringUtil.dedent(reason)
             raise LinearFactoryException(reason, task)
 
         shape_as_list: List[int] = shape.tolist()
@@ -622,12 +626,12 @@ class Linear(nn.Module):
 
             reason = f"""\
             The provided dynamics tensor does not properly match
-            the shape of the defined dynamic kernel and thus
+            the dynamic_shape of the defined dynamic kernel and thus
             cannot be assembled. It was expected to start with
-            shape {torch.Size(shape)}, but what was actually 
-            found was a tensor with shape {dynamic_shape}            
+            dynamic_shape {torch.Size(shape)}, but what was actually 
+            found was a tensor with dynamic_shape {dynamic_shape}            
             """
-            reason = Core.dedent(reason)
+            reason = src.supertransformerlib.Core.StringUtil.dedent(reason)
             raise LinearFactoryException(reason, task)
         if dynamic.is_sparse and dynamic.sparse_dim() != shape_dim:
             reason = f"""\
@@ -636,15 +640,15 @@ class Linear(nn.Module):
             hybrid tensors must have sparse rank of {shape_dim}
             however found {dynamic.sparse_dim()}
             """
-            reason = Core.dedent(reason)
+            reason = src.supertransformerlib.Core.StringUtil.dedent(reason)
             raise LinearFactoryException(reason, task)
 
 
     def __init__(self,
-                 input_shape: Core.StandardShapeType,
-                 output_shape: Core.StandardShapeType,
-                 parallel: Optional[Core.StandardShapeType] = None,
-                 dynamic: Optional[Core.StandardShapeType] = None,
+                 input_shape: src.supertransformerlib.Core.Functions.StandardShapeType,
+                 output_shape: src.supertransformerlib.Core.Functions.StandardShapeType,
+                 parallel: Optional[src.supertransformerlib.Core.Functions.StandardShapeType] = None,
+                 dynamic: Optional[src.supertransformerlib.Core.Functions.StandardShapeType] = None,
                  dtype: Optional[torch.dtype] = None,
                  device: Optional[torch.device] = None,
                  use_bias: bool = True,
@@ -652,10 +656,10 @@ class Linear(nn.Module):
                  ):
         """
 
-        :param input_shape: What shape, in either list or int format, to accept as inputs for linear
-        :param output_shape: What shape, in either list or int format, to accept as inputs for linear
-        :param parallel: What shape, in either list or int format, to setup as ensemble dimensions
-        :param dynamic: What shape, in either list or int format, to setup as dynamic dimensions
+        :param input_shape: What dynamic_shape, in either list or int format, to accept as inputs for linear
+        :param output_shape: What dynamic_shape, in either list or int format, to accept as inputs for linear
+        :param parallel: What dynamic_shape, in either list or int format, to setup as ensemble dimensions
+        :param dynamic: What dynamic_shape, in either list or int format, to setup as dynamic dimensions
         :param dtype: The dtype. Defaults to float64
         :param device: The device. Defaults to CPU
         :param use_bias: Whether to use biass
@@ -666,13 +670,13 @@ class Linear(nn.Module):
         super().__init__()
 
         task = "Creating a linear layer"
-        input_shape = Core.standardize_shape(input_shape, 'input_shape', task=task)
-        output_shape = Core.standardize_shape(output_shape, 'output_shape', task=task)
+        input_shape = src.supertransformerlib.Core.Functions.standardize_shape(input_shape, 'input_shape', task=task)
+        output_shape = src.supertransformerlib.Core.Functions.standardize_shape(output_shape, 'output_shape', task=task)
 
         if parallel is not None:
-            parallel = Core.standardize_shape(parallel, 'parallel', task=task)
+            parallel = src.supertransformerlib.Core.Functions.standardize_shape(parallel, 'parallel', task=task)
         if dynamic is not None:
-            dynamic = Core.standardize_shape(dynamic, 'dynamic', task=task)
+            dynamic = src.supertransformerlib.Core.Functions.standardize_shape(dynamic, 'dynamic', task=task)
 
 
         self.input_shape = input_shape
@@ -710,7 +714,7 @@ class Linear(nn.Module):
             Factory was called with non-None dynamic, but layer 
             was defined with no dynamic dimensions
             """
-            reason = Core.dedent(reason)
+            reason = src.supertransformerlib.Core.StringUtil.dedent(reason)
             raise LinearFactoryException(reason, task)
         if self.dynamic is not None and dynamic is None:
             reason = f"""\
@@ -718,7 +722,7 @@ class Linear(nn.Module):
             it is the case that the linear layer is defined
             with dynamic dimensions
             """
-            reason = Core.dedent(reason)
+            reason = src.supertransformerlib.Core.StringUtil.dedent(reason)
             raise LinearFactoryException(reason, task)
 
         dynamic_shape = self.dynamic # Must copy line into local memory or torchscript throws a fit when refining types.

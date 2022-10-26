@@ -84,7 +84,7 @@ class test_MultiHeadedAttention(unittest.TestCase):
         self.assertTrue(shape_equal([3, 5, 10, 32], attn.shape))
 
     def test_uneven_embeddings(self):
-        """ tests if attention works when the embeddings are changing shape """
+        """ tests if attention works when the embeddings are changing dynamic_shape """
         query = torch.randn([3,5,10, 64])
         content = torch.randn([3, 5, 30, 16])
         layer = Attention.MultiHeadedAttention(64, 16, 32, 4)

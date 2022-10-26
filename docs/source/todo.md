@@ -1,28 +1,31 @@
 
 # Core
 
+## Kernel
+
 * Extract superposition from linear and turn it into Parameter.
   * Extract into kernel
   * Move validation logic into core
   * Create new error cases
   * Create tests for error cases.
 
-* Refactor core by moving string utilities into their own section
-  * Move dedent, etc into strings
-  * Move error cases around
+## Functions
 
-* Develop circular padding
-  * Create vector representation of circular padding  
-  * Create unit tests for circular padding. based on current implimentation
-  * Create sane errors for circular padding.
-  * Create circular padding
-  * Verify unit test work correctly
+* Develop circular padding: DONE
+* Develop get stride and point to for when torch updates
+* Develop get size
+
+## Errors
+
+* Move primary error into it's own file.
+* Make error type change with type call
 
 
-* Parameter should be callable with or without superposition definition and
-return tensor block
-* Refactor core into multiple files.
-* Refactor errors to lie by themselves. 
+
+## Stringwork
+
+* NIT: Rebuild dedent to match textwrap dedent more closely. Particularly, handled \n\n more elegantly
+
 
 # Basics
 

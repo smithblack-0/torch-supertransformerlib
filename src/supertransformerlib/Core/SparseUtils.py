@@ -6,7 +6,7 @@ import torch
 def calculate_shape_strides(shape: List[int])->torch.Tensor:
     """
     Calculate and return the strides associated
-    with a particular tensor shape assuming
+    with a particular tensor dynamic_shape assuming
     the strides are defined with the last dim
     having the smallest jump
 
@@ -28,7 +28,7 @@ def calculate_shape_strides(shape: List[int])->torch.Tensor:
 
 def gen_indices_from_mask(mask: torch.Tensor)->torch.Tensor:
     """
-    Generates sparse tensor indices from a mask of a particular shape.
+    Generates sparse tensor indices from a mask of a particular dynamic_shape.
 
     This can be combined with a masked select to quickly create a hybrid
     or sparse tensor

@@ -33,7 +33,7 @@ class AdaptiveMap:
         When transforming, it restricts the output to
         a flat batch of only unhalted channels.
 
-        :param tensor: Tensor to map into restricted space. Should be shape (...batch, query, Qptional[...more])
+        :param tensor: Tensor to map into restricted space. Should be dynamic_shape (...batch, query, Qptional[...more])
         :return: The tensor, mapped into restricted space. Will look like (flatbatch, query, Optional[...more])
         """
         tensor = self._flatten_batch(tensor)
@@ -49,12 +49,12 @@ class AdaptiveMap:
         :return: The updated tensor.
         """
 
-        # Expand mask to match shape
+        # Expand mask to match dynamic_shape
         mask = self.mask
         tensor = tensor.clone()
         tensor = self._flatten_batch(tensor)
         if mask.dim() < len(self.shape):
-            # Figure out what the expansion shape is,
+            # Figure out what the expansion dynamic_shape is,
             # make extra dimensions, then expand mask
             # using views.
             shape = [-1] * mask.dim()
@@ -162,7 +162,7 @@ class AdaptiveTranslator():
     for performing adaptive halting, and from which information
     can be drawn for a round. Alternatively, a tensor can be the
     draw source for mapping so long as it is the case the tensor
-    matches the buffer shape.
+    matches the buffer dynamic_shape.
 
     After processing, the update functions will then update
     the original tensor or buffer, while carrying over halted

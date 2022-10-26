@@ -137,7 +137,7 @@ class testClosureExceptions(unittest.TestCase):
     def test_wrong_linear_dim(self):
         """
         Test a reasonable error occurs when the last dimension is the
-        wrong shape for the kernel
+        wrong dynamic_shape for the kernel
         """
         tensor = torch.randn([40, 20, 15, 7])
         kernel = torch.randn([15, 10, 5])

@@ -8,9 +8,13 @@ of torch's reshape with a few extra tricks.
 from typing import Optional, List
 import torch
 from torch import nn
-from src.supertransformerlib import Core
 
-class ReshapeException(Core.ValidationError):
+import src.supertransformerlib.Core.Errors as Errors
+import src.supertransformerlib.Core.Functions as Functions
+import src.supertransformerlib.Core.StringUtil as StringUtil
+import src.supertransformerlib.Core.SparseUtils as SparseUtil
+
+class ReshapeException(Errors.ValidationError):
     """
     A error type for when reshape fails
     """
@@ -36,7 +40,7 @@ def validate_sparse_reshape(tensor: torch.Tensor,
         Are you trying to reshape the dense part of a hybrid tensor? That is
         not currently supported. 
         """
-        reason = Core.dedent(reason)
+        reason = StringUtil.dedent(reason)
         raise ReshapeException(reason, task)
 
     sparse_shape = tensor.shape[:sparse_dim]
@@ -45,11 +49,11 @@ def validate_sparse_reshape(tensor: torch.Tensor,
         temp_input_shape = torch.Size(input_shape)
         tensor_shape = sparse_shape[-reshape_dim:]
         reason = f"""\
-        Param 'tensor' shape and param 'input_shape' shape do not match:
-            The param 'tensor' has shape {tensor_shape}.
+        Param 'tensor' dynamic_shape and param 'input_shape' dynamic_shape do not match:
+            The param 'tensor' has dynamic_shape {tensor_shape}.
             This cannot be broadcast with {temp_input_shape}.
         """
-        reason = Core.dedent(reason)
+        reason = StringUtil.dedent(reason)
         raise ReshapeException(reason, task)
 
     # Now th
@@ -65,7 +69,7 @@ def validate_sparse_reshape(tensor: torch.Tensor,
             These do not match.
 
         """
-        reason = Core.dedent(reason)
+        reason = StringUtil.dedent(reason)
         raise ReshapeException(reason, task)
 
 
@@ -73,17 +77,17 @@ def _sparse_reshape(tensor: torch.Tensor,
                     input_shape: torch.Tensor,
                     output_shape: torch.Tensor) -> torch.Tensor:
     """
-    Performs a sparse reshape on a tensor to another shape.
+    Performs a sparse reshape on a tensor to another dynamic_shape.
 
     :param tensor: The sparse tensor to reshape
-    :param shape: The shape the tensor should end up in
+    :param dynamic_shape: The dynamic_shape the tensor should end up in
     :return: The reshaped sparse tensor
     """
     # Perform a sparse reshape in a torchscript compatible method
     #
     # This is done by first converting the index to be an equivalent tensor
     # in flattened strided notation, then rebuilding the index under the new
-    # shape.
+    # dynamic_shape.
     #
     # This is only capable of reshaping the sparse dimensions. Dense dimensions
     # will cause errors
@@ -97,7 +101,7 @@ def _sparse_reshape(tensor: torch.Tensor,
     sparse_dim = tensor.sparse_dim()
     sparse_shape = tensor.shape[:sparse_dim]
     dense_shape = tensor.shape[sparse_dim:]
-    sparse_strides = Core.calculate_shape_strides(sparse_shape)
+    sparse_strides = SparseUtil.calculate_shape_strides(sparse_shape)
 
     indices = tensor.indices()
     values = tensor.values()
@@ -105,13 +109,13 @@ def _sparse_reshape(tensor: torch.Tensor,
     flat_indices = indices*sparse_strides.unsqueeze(-1)
     flat_indices = flat_indices.sum(dim=0)
 
-    #Develop proper final shape.
+    #Develop proper final dynamic_shape.
 
     broadcast_length = input_shape.shape[0]
     static_shape = torch.tensor(sparse_shape[:-broadcast_length], dtype=torch.int64)
     final_shape = torch.concat([static_shape, output_shape])
     final_shape_as_list: List[int] = final_shape.tolist() #Line required or torchscript throws a hissy fit
-    final_strides = Core.calculate_shape_strides(final_shape_as_list)
+    final_strides = SparseUtil.calculate_shape_strides(final_shape_as_list)
 
     # Use strides to reassemble flat indices. This is a little
     # complex, so here is what is going on
@@ -140,7 +144,7 @@ def validate_dense_reshape(tensor: torch.Tensor,
                      task: Optional[str] = None
                      ):
     # Verify the number of tensor dimensions is large enough to encapsulate
-    # the input shape and output shape
+    # the input dynamic_shape and output dynamic_shape
 
     if tensor.dim() - input_shape.shape[0] < 0:
         tensor_dim = tensor.dim()
@@ -150,10 +154,10 @@ def validate_dense_reshape(tensor: torch.Tensor,
         Param 'tensor' has rank {tensor_dim}. 
         However, Param 'input_shape' is {input_dim} units long.
         """
-        reason = Core.dedent(reason)
+        reason = StringUtil.dedent(reason)
         raise ReshapeException(reason, task)
 
-    # Verify that the input_shape matches the tensor shape on
+    # Verify that the input_shape matches the tensor dynamic_shape on
     # the broadcast dimensions
 
     input_shape_length = input_shape.shape[0]
@@ -162,11 +166,11 @@ def validate_dense_reshape(tensor: torch.Tensor,
         temp_input_shape = torch.Size(input_shape)
         tensor_shape = tensor.shape
         reason = f"""\
-        Param 'tensor' shape and param 'input_shape' shape do not match:
-            The param 'tensor' has shape {tensor_shape}.
+        Param 'tensor' dynamic_shape and param 'input_shape' dynamic_shape do not match:
+            The param 'tensor' has dynamic_shape {tensor_shape}.
             This cannot be broadcast with {temp_input_shape}.
         """
-        reason = Core.dedent(reason)
+        reason = StringUtil.dedent(reason)
         raise ReshapeException(reason, task)
 
     if input_shape.prod() != output_shape.prod():
@@ -181,7 +185,7 @@ def validate_dense_reshape(tensor: torch.Tensor,
             These do not match.
 
         """
-        reason = Core.dedent(reason)
+        reason = StringUtil.dedent(reason)
         raise ReshapeException(reason, task)
 
 def dense_reshape(tensor: torch.Tensor,
@@ -201,8 +205,8 @@ def dense_reshape(tensor: torch.Tensor,
 
 
 def reshape(tensor: torch.Tensor,
-            input_shape: Core.StandardShapeType,
-            output_shape: Core.StandardShapeType,
+            input_shape: Functions.StandardShapeType,
+            output_shape: Functions.StandardShapeType,
             validate: bool = True,
             task: Optional[str] = None,
             ) -> torch.Tensor:
@@ -210,7 +214,7 @@ def reshape(tensor: torch.Tensor,
     Performs validation and then performs a reshape.
     The reshape mechanism is broadcastable. This means
     demanding a reshape from [4, 5] to [20] will work
-    on a tensor of shape [10, 3, 4, 5] and yield
+    on a tensor of dynamic_shape [10, 3, 4, 5] and yield
     [10, 3, 20]
 
     An entirely pure function. For clearer errors,
@@ -221,15 +225,15 @@ def reshape(tensor: torch.Tensor,
     There is no hybrid reshaping.
 
     :param tensor: The tensor to reshape
-    :param input_shape: The input shape
-    :param output_shape: The output shape
+    :param input_shape: The input dynamic_shape
+    :param output_shape: The output dynamic_shape
     :param validate: Whether or not to validate the action.
     :param task: What is going on when the error happened. Used for nice error messages.
     :return: The reshaped tensor
     """
 
-    input_shape = Core.standardize_shape(input_shape, "input_shape")
-    output_shape = Core.standardize_shape(output_shape, "output_shape")
+    input_shape = Functions.standardize_shape(input_shape, "input_shape")
+    output_shape = Functions.standardize_shape(output_shape, "output_shape")
 
     if tensor.is_sparse:
         if validate:
@@ -256,12 +260,12 @@ class ReshapeClosure:
         a definition for '{parameter}' or run constructor with a default for
         '{parameter}'
         """
-        missing_parameter_message = Core.dedent(missing_parameter_message)
+        missing_parameter_message = StringUtil.dedent(missing_parameter_message)
         return missing_parameter_message
 
     def __init__(self,
-                 input_shape: Optional[Core.StandardShapeType] = None,
-                 output_shape: Optional[Core.StandardShapeType] = None,
+                 input_shape: Optional[Functions.StandardShapeType] = None,
+                 output_shape: Optional[Functions.StandardShapeType] = None,
                  validate: Optional[bool] = None,
                  task: Optional[str] = None,
                  ):
@@ -271,9 +275,9 @@ class ReshapeClosure:
         substitute these defaults.
         """
         if input_shape is not None:
-            input_shape = Core.standardize_shape(input_shape, 'input_shape')
+            input_shape = Functions.standardize_shape(input_shape, 'input_shape')
         if output_shape is not None:
-            output_shape = Core.standardize_shape(output_shape, 'output_shape')
+            output_shape = Functions.standardize_shape(output_shape, 'output_shape')
 
         self.input_shape = input_shape
         self.output_shape = output_shape
@@ -282,8 +286,8 @@ class ReshapeClosure:
 
     def __call__(self,
                  tensor: torch.Tensor,
-                 input_shape: Optional[Core.StandardShapeType] = None,
-                 output_shape: Optional[Core.StandardShapeType] = None,
+                 input_shape: Optional[Functions.StandardShapeType] = None,
+                 output_shape: Optional[Functions.StandardShapeType] = None,
                  validate: bool = True,
                  task: Optional[str] = None,
                  ) -> torch.Tensor:
@@ -293,14 +297,14 @@ class ReshapeClosure:
         if input_shape is None:
             reason = self.generate_missing_param_message("input_shape")
             raise ReshapeException(reason, task)
-        input_shape = Core.standardize_shape(input_shape, "input_shape", task=task)
+        input_shape = Functions.standardize_shape(input_shape, "input_shape", task=task)
 
         if output_shape is None:
             output_shape = self.output_shape
         if output_shape is None:
             reason = self.generate_missing_param_message("output_shape")
             raise ReshapeException(reason, task)
-        output_shape = Core.standardize_shape(output_shape, "output_shape", task=task)
+        output_shape = Functions.standardize_shape(output_shape, "output_shape", task=task)
 
         # handle validation
         if validate is None:
@@ -335,8 +339,8 @@ class ReshapeFactory(nn.Module):
     """
 
     def __init__(self,
-                 input_shape: Optional[Core.StandardShapeType] = None,
-                 output_shape: Optional[Core.StandardShapeType] = None,
+                 input_shape: Optional[Functions.StandardShapeType] = None,
+                 output_shape: Optional[Functions.StandardShapeType] = None,
                  validate: bool = True,
                  task: Optional[str] = None
                  ):
@@ -347,9 +351,9 @@ class ReshapeFactory(nn.Module):
         """
         super().__init__()
         if input_shape is not None:
-            input_shape = Core.standardize_shape(input_shape, 'input_shape')
+            input_shape = Functions.standardize_shape(input_shape, 'input_shape')
         if output_shape is not None:
-            output_shape = Core.standardize_shape(output_shape, 'output_shape')
+            output_shape = Functions.standardize_shape(output_shape, 'output_shape')
 
         self.input_shape = input_shape
         self.output_shape = output_shape
