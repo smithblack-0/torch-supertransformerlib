@@ -3,6 +3,83 @@ import torch
 import itertools
 import src.supertransformerlib.Core.SampleUtils as SampleUtils
 
+
+class test_top_K_Mask(unittest.TestCase):
+    """
+    Test the ability to generate a top-k mask
+    given a tensor.
+    """
+    def manually_calculate_top_k(self, tensor: torch.Tensor, number: int)->torch.Tensor:
+        """
+        Manually calculate the top k mask by taking apart
+        the incoming batched tensor into a 1d format. Then
+        process the base case
+        """
+        if tensor.dim() == 1:
+            _, index = torch.topk(tensor, number, dim=-1)
+            mask = torch.full_like(tensor, False, dtype=torch.bool)
+            for i in index:
+                mask[i] = True
+            return mask
+
+        layers = tensor.unbind(0)
+        output = []
+        for layer in layers:
+            outcome = self.manually_calculate_top_k(layer, number)
+            output.append(outcome)
+        return torch.stack(output, dim=0)
+
+    def test_1d_cases(self):
+        """ Test some cases in 1d"""
+
+        dims = [1, 2, 10, 40]
+        nums = [1, 2, 5]
+        options = itertools.product(dims, nums)
+
+        for dim, num in options:
+            if num > dim:
+                continue
+
+
+            tensor = torch.rand([dim])
+
+            try:
+                expected = self.manually_calculate_top_k(tensor, num)
+                got = SampleUtils.top_k_mask(tensor, num)
+
+                self.assertTrue(torch.all(expected == got))
+            except Exception as err:
+                expected = self.manually_calculate_top_k(tensor, num)
+                got = SampleUtils.top_k_mask(tensor, num)
+
+                self.assertTrue(torch.all(expected == got))
+    def test_3d_cases(self):
+
+        dims0 = [1, 5, 10]
+        dims1 = [1, 5, 10]
+        dims2 = [1, 5, 10]
+        nums = [1, 4, 8, 10]
+
+        options = itertools.product(dims0, dims1, dims2, nums)
+
+        for dim0, dim1, dim2, num in options:
+            if num > dim2:
+                continue
+
+
+            tensor = torch.randn([dim0, dim1, dim2])
+
+            try:
+                expected = self.manually_calculate_top_k(tensor, num)
+                got = SampleUtils.top_k_mask(tensor, num)
+                self.assertTrue(torch.all(expected == got))
+            except Exception as err:
+                print(dim0, dim1, dim2, num)
+                expected = self.manually_calculate_top_k(tensor, num)
+                got = SampleUtils.top_k_mask(tensor, num)
+                self.assertTrue(torch.all(expected == got))
+
+
 class test_top_P_Mask(unittest.TestCase):
     """
     A test case for top p

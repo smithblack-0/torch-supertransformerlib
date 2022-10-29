@@ -44,7 +44,7 @@ def top_k_mask(tensor: torch.Tensor, num: int, task: Optional[str] = None)->torc
     sorted_index = sorted_index[..., :num]
     numerical_index_reference = torch.arange(tensor.shape[-1], device=tensor.device, dtype= torch.int64)
     mask = sorted_index.unsqueeze(-1) == numerical_index_reference
-    mask = torch.any(mask, dim=-1)
+    mask = torch.any(mask, dim=-2)
     return mask
 
 
