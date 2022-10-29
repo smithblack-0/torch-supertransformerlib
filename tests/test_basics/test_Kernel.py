@@ -3,7 +3,7 @@ import unittest
 import torch
 from torch.nn import init
 
-from src.supertransformerlib.Core import Kernel
+from src.supertransformerlib.Basics import Kernel
 from src.supertransformerlib.Core import SparseUtils
 from src.supertransformerlib import Core
 

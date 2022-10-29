@@ -10,7 +10,6 @@ import torch
 
 import src.supertransformerlib.Core.Errors
 import src.supertransformerlib.Core.Functions
-from src.supertransformerlib import Glimpses, Core
 from src.supertransformerlib.Core import Reshape
 from torch.nn import functional
 
@@ -38,7 +37,7 @@ class testfunctionreshape(unittest.TestCase):
                            expected_shape: torch.Size,
                            validation=True,
                            task=None):
-            output = Glimpses.reshape(tensor, input_shape, output_shape, validation, task)
+            output = Reshape.reshape(tensor, input_shape, output_shape, validation, task)
             self.assertTrue(output.shape == expected_shape)
 
         good_simple = (torch.randn([5]), 5, 5, torch.Size([5]))
@@ -64,7 +63,7 @@ class testfunctionreshape(unittest.TestCase):
 
 
             try:
-                Glimpses.reshape(tensor, input_shape, output_shape)
+                Reshape.reshape(tensor, input_shape, output_shape)
                 raise RuntimeError("Did not throw exception")
             except torch.jit.Error as err:
                 if print_errors:
@@ -73,64 +72,13 @@ class testfunctionreshape(unittest.TestCase):
                 if print_errors:
                     print(err)
 
-        bad_element_num = (torch.randn([5]), 5, 3, Glimpses.ReshapeException)
+        bad_element_num = (torch.randn([5]), 5, 3, Reshape.ReshapeException)
         bad_shape = (torch.randn([5]), [-5], [-5], src.supertransformerlib.Core.Errors.StandardizationError)
-        bad_dim_number = (torch.randn([5]), [3,6], 18, Glimpses.ReshapeException)
+        bad_dim_number = (torch.randn([5]), [3,6], 18, Reshape.ReshapeException)
 
         should_fail(*bad_shape)
         should_fail(*bad_dim_number)
         should_fail(*bad_element_num)
-
-class testClosure(unittest.TestCase):
-    """
-    Test that the closure mechanism
-    is working. This effectively behaves as
-    though it has a bunch of provided defaults.
-
-    If no default exists, and no provided
-    value exists, throw an error.
-    """
-    def test_totally_closure_defined(self):
-        """Test things work when totally defined on the closure end"""
-        tensor = torch.randn([10, 10, 5])
-        keywords = {
-            'input_shape': [10, 5],
-            'output_shape': [5, 10],
-            'validate' : True,
-            'task' : 'testing'
-        }
-
-        closure = Glimpses.ReshapeClosure(**keywords)
-        closure(tensor)
-
-    def test_totally_defined_at_call(self):
-        """Test things work when totally defined at the call level"""
-
-        tensor = torch.randn([10, 10, 5])
-        keywords = {
-            'input_shape': [10, 5],
-            'output_shape': [5, 10],
-            'validate': True,
-            'task': 'testing'
-        }
-
-        closure = Glimpses.ReshapeClosure()
-        closure(tensor, **keywords)
-    def test_defaults_overridden(self):
-        """Test the defaults are being overridden when using a closure"""
-        tensor = torch.randn([10, 10, 5])
-        keywords = {
-            'input_shape': [10, 5],
-            'output_shape': [5, 10],
-            'validate' : True,
-            'task' : 'testing'
-        }
-        #TODO: more thorough tests
-
-        closure = Glimpses.ReshapeClosure(**keywords)
-        output = closure(tensor, output_shape=[50])
-        self.assertTrue(output.shape == torch.Size([10, 50]))
-
 
 class test_sparse_reshape(unittest.TestCase):
     """

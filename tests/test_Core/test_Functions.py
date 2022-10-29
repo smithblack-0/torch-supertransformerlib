@@ -178,3 +178,11 @@ class test_functions(unittest.TestCase):
         test_succeed(*succeed)
         test_failure(*wrong_type)
         test_failure(*not_in)
+
+
+class testTopK(unittest.TestCase):
+    """
+    Test unit for the top-k method in core.
+
+
+    """

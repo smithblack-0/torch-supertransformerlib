@@ -5,12 +5,11 @@ from typing import Dict, Union
 from typing import List
 import numpy as np
 
+tensor = torch.arange(100).reshape(10, 10)
+mask = torch.rand([10, 10]) > 0.5
 
 
-
-
-tensor = torch.randn([3, 10, 10])
-array = tensor.numpy()
-array = np.pad(array, [(1, 2), (1, 2)])
-tensor = torch.from_numpy(array)
-print(tensor.shape)
+viewpoint = tensor[mask]
+viewpoint[:] = 1
+print(tensor)
+print(viewpoint)

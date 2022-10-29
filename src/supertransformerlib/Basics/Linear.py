@@ -11,11 +11,10 @@ three distinct steps. These are
 * Executing the Closure with whatever is so desired.
 
 """
-from typing import Optional, List
+from typing import Optional
 
 import torch
 
-import src.supertransformerlib.Core as Core
 import src.supertransformerlib.Core.Errors
 import src.supertransformerlib.Core.Functions
 import src.supertransformerlib.Core.StringUtil
@@ -207,7 +206,7 @@ class LinearClosure:
             task = "Executing a linear operation."
 
         if input_map is not None:
-            tensor = input_map(tensor)
+            tensor = input_map(tensor, task=task)
 
         if self.validate:
             self.validate_primitive(tensor, task)

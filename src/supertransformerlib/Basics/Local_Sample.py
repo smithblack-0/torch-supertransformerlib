@@ -11,6 +11,7 @@ import torch
 from torch import nn
 from torch.nn import functional as F
 
+import src.supertransformerlib.Core as Core
 import src.supertransformerlib.Core.Errors
 import src.supertransformerlib.Core.Functions
 import src.supertransformerlib.Core.StringUtil
@@ -20,7 +21,7 @@ from typing import Tuple, List, Optional
 # Not actually utilized, but manually impliments the process.
 # It is instead far more efficient to use as strided
 
-class ConvolutionalError(src.supertransformerlib.Core.Errors.ValidationError):
+class LocalError(src.supertransformerlib.Core.Errors.ValidationError):
     """
     An error to throw when convolution is going badly
     """
@@ -28,7 +29,7 @@ class ConvolutionalError(src.supertransformerlib.Core.Errors.ValidationError):
     def __init__(self, reason: str, task: Optional[str] = None):
         self.reason = reason
         self.task = task
-        super().__init__("ConvolutionalError", reason, task)
+        super().__init__("LocalError", reason, task)
 
 
 def round_to_nearest_node(tensor: torch.Tensor,
@@ -163,9 +164,7 @@ def native_local_sample(
     # stride multiplied by the given one, and dilations are applied to the original strides
     # for sampling along the local dimension.
 
-    current_strides = torch.tensor([tensor.stride(dim) for dim in range(tensor.dim())],
-                                   dtype=torch.int64)  # Workaround for bad typing on Tensor.stride. Torchscript wont
-                                                       # do tensor.stride()
+    current_strides = Core.get_strides(tensor)
     static_strides = current_strides[:-local_lengths]
     input_mutating_strides = current_strides[-local_lengths:]
 
@@ -265,8 +264,7 @@ def padded_local_sample(
     # dilation. Meanwhile, the updated size will be multiplied by the stride
     # directive
 
-    current_strides = torch.tensor([buffer.stride(dim) for dim in range(buffer.dim())],
-                                   dtype=torch.int64)  # Workaround for bad typing on Tensor.stride. Torchscript wont do tensor.stride()
+    current_strides = Core.get_strides(buffer)
     static_strides = current_strides[:-local_lengths]
     input_mutating_strides = current_strides[-local_lengths:]
 
@@ -289,6 +287,92 @@ def padded_local_sample(
 
 
 torch.jit.script(padded_local_sample)
+
+def circular_local_sample(
+        tensor: torch.Tensor,
+        start: torch.Tensor,
+        end: torch.Tensor,
+        stride: torch.Tensor,
+        dilation: torch.Tensor,
+        offset: torch.Tensor,
+) -> torch.Tensor:
+    """
+    The circular local sampling system. Behaves very
+    similar to the native sampling system, except
+    locations which do not have a native view are padded
+    with wrapped elements.
+    """
+
+    # We handle this problem by creating a new buffer containing a
+    # padded version of the original tensor, with padding sufficient to
+    # draw all requisite samples. Offsets are used to handle the fact
+    # that potentially we will start partway inside the buffer.
+
+    # Calculate the padding and offset requirements. Padding
+    # will consist of whatever is needed to ensure the natural
+    # offset starts cleanly, while offset requirements here may
+    # be needed in order to handle positive offsets which will otherwise
+    # start at zero. Once we figure out the padding, calculate the
+    # buffer tensor
+
+    local_lengths = start.shape[0]
+    dim_lengths = torch.tensor(tensor.shape[-local_lengths:], dtype=torch.int64)
+    natural_start = offset + start * dilation
+    start_padding = torch.where(-natural_start < 0, 0, -natural_start)
+    start_offsets = torch.where(natural_start > 0, natural_start, 0)
+
+    kernel_length = (end - start + 1) * dilation
+    natural_end = natural_start + dim_lengths - 1
+    end_padding = natural_end - (
+                dim_lengths - kernel_length - 1)  # The natural sampling end point, traveling along the kernel
+    end_padding = torch.where(end_padding < 0, 0, end_padding)
+
+    padding = torch.stack([start_padding, end_padding], dim=-1)
+    padding = torch.flip(padding, dims=[0]) #Padding wants to define outputs last
+    padding = padding.flatten()
+    padding: List[int] = padding.tolist()
+    buffer = Core.pad_circular(tensor, padding)
+
+    # Calculate the required dynamic_shape. This involves looking at the
+    # current dynamic_shape and dividing it by the stride then rounding down,
+    # and including this along with the static dynamic_shape and local dims
+    # enlarging the dimensions to account for the new locations.
+    #
+    # Note that the update dynamic_shape is the solution to
+    # stride(n -1) >= length - 1, solved for n.
+
+    static_shape = torch.tensor(tensor.shape[:-local_lengths], dtype=torch.int64)
+    local_shape = end - start + 1
+    update_shape = torch.div(dim_lengths - 1 + stride, stride, rounding_mode="floor")
+    new_shape: List[int] = torch.concat([static_shape, update_shape, local_shape]).tolist()
+
+    # Calculate the new strides. The strides for the
+    # local dimension are influenced by the dilation, and
+    # will consist of the stride of the dimension being sampled from times the
+    # dilation. Meanwhile, the updated size will be multiplied by the stride
+    # directive
+
+    current_strides = Core.get_strides(buffer)
+    static_strides = current_strides[:-local_lengths]
+    input_mutating_strides = current_strides[-local_lengths:]
+
+    updated_strides = input_mutating_strides * stride
+    local_strides = input_mutating_strides * dilation
+
+    new_stride: List[int] = torch.concat(
+        [static_strides, updated_strides, local_strides]).tolist()  # List so torchscript is happy
+
+    # Finish developing the offsets. The offsets are currently defined per dimension, but
+    # as_strided accepts a data buffer offset, not a vector offset. As a result, we combine
+    # the offset with the stride to get the integer representation instead
+
+    new_offsets = input_mutating_strides * start_offsets
+    new_offset = int(new_offsets.sum())
+
+    # Perform the sampling. Then return the result
+
+    return buffer.as_strided(new_shape, new_stride, new_offset)
+
 
 
 def local_sample(
@@ -343,7 +427,7 @@ def local_sample(
         allowed.
         """
         reason = src.supertransformerlib.Core.StringUtil.dedent(reason)
-        raise ConvolutionalError(reason, task)
+        raise LocalError(reason, task)
     if start.shape[0] != end.shape[0]:
         reason = f"""\
         Param 'start' and param 'end' did not have 
@@ -351,7 +435,7 @@ def local_sample(
         while 'end' has rank {end.shape[0]}
         """
         reason = src.supertransformerlib.Core.StringUtil.dedent(reason)
-        raise ConvolutionalError(reason, task)
+        raise LocalError(reason, task)
     if start.shape[0] != stride.shape[0]:
         reason = f"""\
         Param 'start' and param 'stride' did not have the
@@ -359,7 +443,7 @@ def local_sample(
         'stride' has rank {stride.shape[0]}
         """
         reason = src.supertransformerlib.Core.StringUtil.dedent(reason)
-        raise ConvolutionalError(reason, task)
+        raise LocalError(reason, task)
     if start.shape[0] != dilation.shape[0]:
         reason = f"""\
         Param 'start' and param 'dilation' did not have
@@ -367,7 +451,7 @@ def local_sample(
         'dilation' has rank {dilation.shape[0]}
         """
         reason = src.supertransformerlib.Core.StringUtil.dedent(reason)
-        raise ConvolutionalError(reason, task)
+        raise LocalError(reason, task)
     if start.shape[0] != offset.shape[0]:
         reason = f"""\
         Param 'offset' and param 'start' did not have the
@@ -375,14 +459,14 @@ def local_sample(
         had rank {offset.shape[0]}
         """
         reason = src.supertransformerlib.Core.StringUtil.dedent(reason)
-        raise ConvolutionalError(reason, task)
+        raise LocalError(reason, task)
     if torch.any(start > end):
         reason = f"""\
         Start nodes were higher than end nodes. This is not 
         allowed. 
         """
         reason = src.supertransformerlib.Core.StringUtil.dedent(reason)
-        raise ConvolutionalError(reason, task)
+        raise LocalError(reason, task)
 
     if mode == "native":
         return native_local_sample(tensor, start, end,
@@ -390,84 +474,15 @@ def local_sample(
     elif mode == "pad":
         return padded_local_sample(tensor, start, end,
                                    stride, dilation, offset)
-
-
-@torch.jit.script
-def local(tensor: torch.Tensor,
-          kernel_width: int,
-          stride_rate: int,
-          dilation_rate: int,
-          start_offset: int = 0,
-          end_offset: int = 0):
-    """
-
-    Description:
-
-    This is a function designed to extract a series of kernels generated by standard convolutional
-    keyword conventions which could, by broadcasted application of weights, be used to actually perform
-    a convolution. The name "local" is due to the fact that the kernels generated are inherently a
-    somewhat local phenomenon.
-
-    When calling this function, a series of kernels with dynamic_shape determined by dilation_rate and kernel_width,
-    and with number determined by stride_rate, will be generated along the last dimension of the input tensor.
-    The output will be a tensor with an additional dimension on the end, with width equal to the size of
-    the kernel, and the second-to-last dimension then indices these kernels.
-
-    Note that the different between initial and final indexing dimensions is:
-        compensation = (kernel_width - 1) * dilation_rate
-
-    See 'dilocal' for a version of this which is fast when dealing with many dilations in parallel, as in banding.
-    Padding by this much is guaranteed to prevent information loss.
-
-    :param tensor: The tensor to take a local kernel out of
-    :param kernel_width: How wide to make the kernel
-    :param stride_rate: How fast to make the stride rate
-    :param dilation_rate: How large the dilation rate should be
-    :param start_offset: How long to wait before sampling from the tensor
-    :param end_offset: Where to stop sampling from the tensor
-    """
-
-    # Input Validation
-
-    assert kernel_width >= 1, "kernel_width should be greater than or equal to 1"
-    assert stride_rate >= 1, "stride_rate should be greater than or equal to 1"
-    assert dilation_rate >= 1, "dilation_rate should be greater than or equal to 1"
-    assert start_offset >= 0
-    assert end_offset >= 0
-
-    # Construct dynamic_shape. Take into account the kernel_width, dilation rate, and stride rate.
-
-    # The kernel width, and dilation rate, together modifies how far off the end of the
-    # data buffer a naive implimentation would go, in an additive manner. Striding, meanwhile
-    # is a multiplictive factor
-
-    effective_length = tensor.shape[-1]
-    effective_length = effective_length - start_offset - end_offset
-    dilated_kernel_width = (kernel_width - 1) * (dilation_rate - 1) + kernel_width
-
-    assert effective_length >= dilated_kernel_width, \
-        ("With given start and end offset insufficient material remains for kernel", effective_length,
-         dilated_kernel_width)
-
-    effective_length = effective_length - dilated_kernel_width
-    final_index_shape = (effective_length + stride_rate) // stride_rate  # Perform striding correction.
-
-    static_shape = torch.tensor(tensor.shape[:-1], dtype=torch.int64)
-    dynamic_shape = torch.tensor((final_index_shape, kernel_width), dtype=torch.int64)
-    final_shape = torch.concat([static_shape, dynamic_shape])
-
-    # Construct the stride. The main worry here is to ensure that the dilation striding, and primary
-    # striding, now occurs at the correct rate. This is done by taking the current one, multiplying,
-    # and putting this in the appropriate location.
-
-    input_stride = [tensor.stride(dim) for dim in range(tensor.dim())]  # Workaround for bad typing on Tensor.stride
-
-    static_stride = torch.tensor(input_stride[:-1], dtype=torch.int64)
-    dynamic_stride = torch.tensor((stride_rate * input_stride[-1], dilation_rate * input_stride[-1]), dtype=torch.int64)
-    final_stride = torch.concat([static_stride, dynamic_stride])
-
-    # perform extraction. Return result
-
-    final_shape: List[int] = final_shape.tolist()
-    final_stride: List[int] = final_stride.tolist()
-    return tensor[..., start_offset:-end_offset].as_strided(final_shape, final_stride)
+    elif mode == "circular":
+        return circular_local_sample(tensor, start, end,
+                                     stride, dilation, offset)
+    else:
+        reason = f"""\
+        It was expected that the local sampling
+        function would be provided with a mode among
+        'native', 'pad', or 'circular'. However, instead
+        recieved '{mode}'. This is not allowed
+        """
+        reason = Core.dedent(reason)
+        raise LocalError(reason, task)

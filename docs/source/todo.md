@@ -1,26 +1,18 @@
 
 # Core
 
-## Kernel
+Should only contain functions.
+No layers
 
-* Extract superposition from linear and turn it into Parameter.
-  * Extract into kernel
-  * Move validation logic into core
-  * Create new error cases
-  * Create tests for error cases.
+
 
 ## Functions
 
 * Develop circular padding: DONE
-* Develop get stride and point to for when torch updates
-* Develop get size
-
-## Errors
-
-* Move primary error into it's own file.
-* Make error type change with type call
-
-
+* Develop get stride: DONE
+* Develop get size: DONE
+* Develop top-k sampling function: DONE
+* Develop top-p sampling function: DONE
 
 ## Stringwork
 
@@ -29,11 +21,41 @@
 
 # Basics
 
-* Reformat linear to use superposition kernel.
-* Finish rollover local function Finish tests
-* Verify errors are sane in local fucntion.
-* Verify errors are thorough in local function
-* Finish local layer.
+* Layers will accept superposition weights when build with them.
+* Layers will display what their superposition and parallel specs are.
+
+## Move
+
+Move reshape into basics
+Move Kernel into basics.
+
+## Linear
+
+Rebuild linear to just accept sp
+
+## Kernel
+
+Mov
+
+## Local
+
+* Create circular local sample case
+  * Develop error cases.
+  * Develop test cases.
+
+## Sample
+
+* Topk, topp, native
+* Dense, sparse
+* Setup, draw.
+
+
+## Superpositions
+
+* Dropout
+* Global Connections
+* Interconnections
+* Weights
 
 # Attention
 

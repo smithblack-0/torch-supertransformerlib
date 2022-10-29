@@ -120,6 +120,8 @@ def make_sparse_superposition(dynamics: torch.Tensor,
 
 torch.jit.script(make_sparse_superposition)
 
+
+
 class Parameter(nn.Module):
     """
     A container for holding a parameter when doing

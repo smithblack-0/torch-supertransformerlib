@@ -49,9 +49,10 @@ def validate_sparse_reshape(tensor: torch.Tensor,
         temp_input_shape = torch.Size(input_shape)
         tensor_shape = sparse_shape[-reshape_dim:]
         reason = f"""\
-        Param 'tensor' dynamic_shape and param 'input_shape' dynamic_shape do not match:
-            The param 'tensor' has dynamic_shape {tensor_shape}.
-            This cannot be broadcast with {temp_input_shape}.
+        Param 'tensor' mutable shape and param 'input_shape' mutable shape do not match:
+        The param 'tensor' has dynamic_shape {tensor_shape}.
+        This cannot be broadcast with {temp_input_shape}.
+        
         """
         reason = StringUtil.dedent(reason)
         raise ReshapeException(reason, task)
@@ -246,125 +247,3 @@ def reshape(tensor: torch.Tensor,
 
 
 
-
-class ReshapeClosure:
-    """
-    Executes a reshape with the stored closure
-    parameters. Emitted by certain factory methods.
-    """
-
-    def generate_missing_param_message(self, parameter: str):
-        missing_parameter_message = f"""\
-        Neither Reshape '__call__' nor Reshape '__init__' include a definition for 
-        parameter '{parameter}'. This parameter is required. Either call with 
-        a definition for '{parameter}' or run constructor with a default for
-        '{parameter}'
-        """
-        missing_parameter_message = StringUtil.dedent(missing_parameter_message)
-        return missing_parameter_message
-
-    def __init__(self,
-                 input_shape: Optional[Functions.StandardShapeType] = None,
-                 output_shape: Optional[Functions.StandardShapeType] = None,
-                 validate: Optional[bool] = None,
-                 task: Optional[str] = None,
-                 ):
-        """
-        One can provide a variety of defaults here.
-        Doing so will cause an unfilled call to automatically
-        substitute these defaults.
-        """
-        if input_shape is not None:
-            input_shape = Functions.standardize_shape(input_shape, 'input_shape')
-        if output_shape is not None:
-            output_shape = Functions.standardize_shape(output_shape, 'output_shape')
-
-        self.input_shape = input_shape
-        self.output_shape = output_shape
-        self.validate = validate
-        self.tasks = task
-
-    def __call__(self,
-                 tensor: torch.Tensor,
-                 input_shape: Optional[Functions.StandardShapeType] = None,
-                 output_shape: Optional[Functions.StandardShapeType] = None,
-                 validate: bool = True,
-                 task: Optional[str] = None,
-                 ) -> torch.Tensor:
-
-        if input_shape is None:
-            input_shape = self.input_shape
-        if input_shape is None:
-            reason = self.generate_missing_param_message("input_shape")
-            raise ReshapeException(reason, task)
-        input_shape = Functions.standardize_shape(input_shape, "input_shape", task=task)
-
-        if output_shape is None:
-            output_shape = self.output_shape
-        if output_shape is None:
-            reason = self.generate_missing_param_message("output_shape")
-            raise ReshapeException(reason, task)
-        output_shape = Functions.standardize_shape(output_shape, "output_shape", task=task)
-
-        # handle validation
-        if validate is None:
-            if self.validate is None:
-                reason = self.generate_missing_param_message("validate")
-                raise ReshapeException(reason, task)
-            else:
-                validate = self.validate
-
-        if task is None:
-            task = self.tasks
-
-        return reshape(
-            tensor,
-            input_shape,
-            output_shape,
-            validate,
-            task
-        )
-
-
-torch.jit.script(ReshapeClosure)
-
-
-class ReshapeFactory(nn.Module):
-    """
-    A layer intended to emit reshape closures on
-    command. May have parts of the reshape call
-    filled in, in which case it will emit a
-    ReshapeClosure that simply expects the remaining
-    parameters to be filled
-    """
-
-    def __init__(self,
-                 input_shape: Optional[Functions.StandardShapeType] = None,
-                 output_shape: Optional[Functions.StandardShapeType] = None,
-                 validate: bool = True,
-                 task: Optional[str] = None
-                 ):
-        """
-        One can provide a variety of defaults here.
-        Doing so will cause an unfilled call to automatically
-        substitute these defaults.
-        """
-        super().__init__()
-        if input_shape is not None:
-            input_shape = Functions.standardize_shape(input_shape, 'input_shape')
-        if output_shape is not None:
-            output_shape = Functions.standardize_shape(output_shape, 'output_shape')
-
-        self.input_shape = input_shape
-        self.output_shape = output_shape
-        self.validate = validate
-        self.task = task
-
-    def forward(self) -> ReshapeClosure:
-        closure = ReshapeClosure(
-            self.input_shape,
-            self.output_shape,
-            self.validate,
-            self.task
-        )
-        return closure

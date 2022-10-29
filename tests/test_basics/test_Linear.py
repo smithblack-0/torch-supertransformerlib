@@ -2,7 +2,6 @@ import unittest
 
 import torch
 from torch import nn
-from src.supertransformerlib import Glimpses
 from src.supertransformerlib.Basics import Linear
 from src.supertransformerlib.Core import SparseUtils
 from src.supertransformerlib import Core
@@ -122,7 +121,7 @@ class testLinearClosure(unittest.TestCase):
         tensor = torch.randn([40, 20, 15, 10])
         kernel = torch.randn([150, 5])
         bias = torch.randn([5])
-        input_map = Glimpses.ReshapeClosure([15, 10], 150)
+        input_map = Core.ReshapeClosure([15, 10], 150)
         output_map = None
         expected_shape = torch.Size([40, 20, 5])
 
@@ -196,26 +195,25 @@ class testKernelConstruct(unittest.TestCase):
     """Test the ability to construct the required linear kernels"""
     def test_basic_sane(self):
         """Test kernel maker is making something sane"""
-        tensor = torch.randn([10])
         input_shape = torch.tensor(10)
         output_shape = torch.tensor(5)
-        parallel = torch.empty([0], dtype=torch.int64)
-        dynamic = torch.empty([0],dtype=torch.int64)
+        parallel = None
+        dynamic = None
         expected_shape = torch.Size([10, 5])
 
-        kernel = Linear.make_kernel(input_shape, output_shape, parallel, dynamic, None, None)
-        Linear.linear_forward(tensor, kernel)
-        self.assertTrue(kernel.shape == expected_shape)
+        parameter = Linear.make_kernel(input_shape, output_shape, parallel, dynamic, None, None)
+        self.assertTrue(torch.Size(parameter.Kernel_Shape) == expected_shape)
     def test_complicated(self):
         """Test that initialization works when far more complicated."""
         input_shape = torch.tensor([30, 20])
         output_shape = torch.tensor(5)
         parallel = torch.tensor([3, 4])
         dynamic = torch.tensor([6, 7])
-        expected_shape = torch.Size([6, 7, 3, 4, 600, 5])
+        expected_shape = torch.Size([3, 4, 600, 5])
 
-        kernel = Linear.make_kernel(input_shape, output_shape, parallel, dynamic, None, None)
-        self.assertTrue(kernel.shape == expected_shape)
+        parameter = Linear.make_kernel(input_shape, output_shape, parallel, dynamic, None, None)
+
+        self.assertTrue(torch.Size(parameter.Kernel_Shape) == expected_shape)
 
 class testBiasConstruct(unittest.TestCase):
     """Test the ability to construct the required linear kernels"""
@@ -302,7 +300,7 @@ class testLinearErrors(unittest.TestCase):
         try:
             layer(sparse_dynamic)
             raise RuntimeError("Did not throw")
-        except Linear.LinearFactoryException as err:
+        except src.supertransformerlib.Basics.Reshape.ReshapeException as err:
             if print_errors:
                 print(err)
 
@@ -341,13 +339,15 @@ class testLinear(unittest.TestCase):
     def test_reshaping(self):
         """Test that the reshaping mechanism is working properly"""
 
-        tensor = torch.randn([3, 5, 6])
+        tensor = torch.randn([10, 3, 5, 6])
         input_shape = [3, 5, 6]
         output_shape = [3, 2]
 
+        expected_shape = torch.Size([10, 3,2])
         layer = Linear.Linear(input_shape, output_shape)
         closure = layer()
         output = closure(tensor)
+        self.assertTrue(expected_shape == output.shape)
 
 
     def test_parallel_utilization(self):
@@ -366,8 +366,8 @@ class testLinear(unittest.TestCase):
         output = closure(tensor)
         self.assertTrue(output.shape == expected_shape)
 
-    def test_dynamic_superposition_dense(self):
-        """ Test that dynamic superposition works properly when doing dense superposition"""
+    def test_superposition_dense(self):
+        """ Test that superposition works properly when doing dense superposition"""
 
         """Tests usage on parallel tensors"""
         tensor = torch.randn([7, 5, 4, 6, 10])
@@ -394,6 +394,7 @@ class testLinear(unittest.TestCase):
         closure = layer(dynamic)
         output = closure(tensor)
         self.assertTrue(output.shape == expected_shape)
+
     def test_torchscript(self):
         """ Test that the linear system torchscript compiles"""
         data = torch.randn([15, 10])
@@ -424,31 +425,4 @@ class testLinear(unittest.TestCase):
 
         instance = Dynamic_Linear_Configuration()
         instance = torch.jit.script(instance) #Optional line. Scripts it
-        output = instance(test_data)
-
-    def test_sparse_configured_dynamic_superposition(self):
-        """Tests sparse dynamic setup and superposition"""
-        batch_shape = [7, 7]
-        input_dim = 5
-        output_dim = 6
-        dynamic = 12
-
-        test_data = torch.randn([*batch_shape, input_dim])
-
-        class Dynamic_Linear_Configuration(nn.Module):
-
-            def __init__(self):
-                super().__init__()
-                self.configuration_layer = Linear.Linear(input_dim, dynamic)
-                self.execution_layer = Linear.Linear(input_dim, output_dim, dynamic=dynamic)
-
-            def forward(self, tensor: torch.Tensor) -> torch.Tensor:
-                configuration = self.configuration_layer()(tensor)
-                configuration = configuration.movedim(-1,
-                                                      0)  # Notice the move required to place the dynamic dim to the front.
-                output = self.execution_layer(configuration)(tensor)
-                return output
-
-        instance = Dynamic_Linear_Configuration()
-        instance = torch.jit.script(instance)  # Optional line. Scripts it
         output = instance(test_data)

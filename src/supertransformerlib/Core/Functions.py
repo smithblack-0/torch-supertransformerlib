@@ -137,3 +137,33 @@ def shape_to_List(shape: torch.Tensor)->List[int]:
     return output
 
 torch.jit.script(shape_to_List)
+
+def get_strides(tensor: torch.Tensor)->torch.Tensor:
+    """
+    Goes through a tensor and fetches the strides
+    in a manner torchscript is happy with.
+    """
+    strides = [tensor.stride(i) for i in range(tensor.dim())]
+    output = torch.tensor(strides, dtype=torch.int64, device=tensor.device)
+    return output
+
+
+def get_shape(tensor: torch.Tensor)->torch.Tensor:
+    """
+    Goes and fetches the shape of a tensor as
+    a 1D tensor. Happily ensures all data type
+    and shape requirements are met
+    """
+    shape = tensor.shape
+    output = torch.tensor(shape, dtype=torch.int64, device=tensor.device)
+    return output
+
+def top_k(
+        tensor: torch.Tensor,
+        sample_mode: str = "mask",
+        return_mode: str = "dense"
+    )->torch.Tensor:
+    """
+    A function dedicated to performing top-k sampling
+    from a given input tensor.
+    """
