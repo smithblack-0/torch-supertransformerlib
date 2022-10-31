@@ -127,7 +127,7 @@ def validate_string_in_options(string: str,
         raise ValueError(msg)
 
 
-def shape_to_List(shape: torch.Tensor)->List[int]:
+def get_shape_as_list(shape: torch.Tensor)->List[int]:
     """
     Small function to turn shape from tensor into list format.
     Useful for torchscript, as torch.Size won't take a tensor
@@ -136,7 +136,7 @@ def shape_to_List(shape: torch.Tensor)->List[int]:
     output: List[int] = shape.tolist()
     return output
 
-torch.jit.script(shape_to_List)
+torch.jit.script(get_shape_as_list)
 
 def get_strides(tensor: torch.Tensor)->torch.Tensor:
     """
@@ -157,13 +157,3 @@ def get_shape(tensor: torch.Tensor)->torch.Tensor:
     shape = tensor.shape
     output = torch.tensor(shape, dtype=torch.int64, device=tensor.device)
     return output
-
-def top_k(
-        tensor: torch.Tensor,
-        sample_mode: str = "mask",
-        return_mode: str = "dense"
-    )->torch.Tensor:
-    """
-    A function dedicated to performing top-k sampling
-    from a given input tensor.
-    """

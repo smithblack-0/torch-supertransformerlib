@@ -139,6 +139,10 @@ def native_local_sample(
     #
     # We also calculate the local dimensions by calculating the
     # number of included kernel elements.
+    #
+    # We also calculate the min and maximum stridenum. This is basically
+    # the minimum and maximum iteration in which an acceptible kernel
+    # may be found
 
     local_lengths = start.shape[0]
     static_shape = torch.tensor(tensor.shape[:-local_lengths], dtype=torch.int64)
@@ -174,6 +178,7 @@ def native_local_sample(
     new_stride: List[int] = torch.concat(
         [static_strides, updated_strides, local_strides]).tolist()  # List so torchscript is happy
 
+    ##################################################################
     # Calculate the required offsets for the particular final position, and clamp
     # negative entries. It is the case that a negative offset can be utilized
     # to perform sampling, but is not allowed by as strided. The behavior
@@ -182,15 +187,35 @@ def native_local_sample(
     # data buffer we start drawing from. Then we turn it into an int, so torchscript will
     # be happy
 
+    # Conceptually, where we start looking at options. If the natural start is greater than
+    # zero, then we must start our offset there as it will be inside the current buffer.
+
+    ######## Offsets #######
+    # Calculate the required offsets.
+    #
+    # Natural start is the place where drawing kernels
+    # conceptually starts from. If it is positive, it is also related to what the offset
+    # will be. Startpoint offset is the first place where a kernel could be drawn from
+    # which matches the arithmetic lattice formed by the startpoint and the stride
+    # within the indicated buffer.
+    #
+    # If natural start is less than zero, we go ahead and use the startpoint offset. It
+    # will be the case under these circumstance the shape will shrink in size as well. Else
+    # we use the natural start. It will be where we first draw from.
+    #
+    # Regardless, we then multiply the offsets by the strides and add them together
+    # with the original offset to get the new offset.
+
+
+
+
     natural_start = offset + start * dilation
     startpoint_offsets = round_to_nearest_node(torch.zeros_like(dimensions_requiring_recalculation),
-                                               stride, natural_start, "ceiling")  # Locks on to the natural lattice.
-    provided_offsets = torch.where(offset < 0, 0, offset)
-    working_offsets = startpoint_offsets + provided_offsets
-    working_offsets = working_offsets * input_mutating_strides
-    new_offset = int(working_offsets.sum())
+                                               stride, natural_start, "ceiling")
 
-    # Perform the efficient strided view, and return the result
+    working_offsets = torch.where(natural_start >= 0, natural_start, startpoint_offsets)
+    working_offsets = working_offsets*input_mutating_strides
+    new_offset: int = int(working_offsets.sum()) + tensor.storage_offset()
 
     return tensor.as_strided(new_shape, new_stride, new_offset)
 
@@ -278,8 +303,9 @@ def padded_local_sample(
     # as_strided accepts a data buffer offset, not a vector offset. As a result, we combine
     # the offset with the stride to get the integer representation instead
 
+    current_offset = buffer.storage_offset()
     new_offsets = input_mutating_strides * start_offsets
-    new_offset = int(new_offsets.sum())
+    new_offset = int(new_offsets.sum()) + current_offset
 
     # Perform the sampling. Then return the result
 
@@ -366,12 +392,13 @@ def circular_local_sample(
     # as_strided accepts a data buffer offset, not a vector offset. As a result, we combine
     # the offset with the stride to get the integer representation instead
 
+    current_offset = buffer.storage_offset()
     new_offsets = input_mutating_strides * start_offsets
-    new_offset = int(new_offsets.sum())
+    new_offset = int(new_offsets.sum()) + current_offset
 
     # Perform the sampling. Then return the result
-
-    return buffer.as_strided(new_shape, new_stride, new_offset)
+    outcome = buffer.as_strided(new_shape, new_stride, new_offset)
+    return outcome
 
 
 
@@ -406,9 +433,14 @@ def local_sample(
     :param stride: The stride of the problem, along each dimension
     :param dilation: The dilation of the problem, along each dimension
     :param offset: The offset of the problem, along each dimension
-    :return: A tensor of the same dynamic_shape, with one extra dimension. This extra dimension is generated
-            by sampling the last N dimensions according to the provided kernel specifications, and
-            concatenating all the samples together.
+    :param mode: One of 'native', 'pad', or 'replicate'.
+        * Native mode only figures out what local kernels can be completely made using the available tensor materials
+        and returns those
+        * pad mode ensures the primary tensor dimensions remain the same shape, and pads the missing elements with zero
+        * replicate mode creates a infinitely scrolling grid where elements are replicated in sequence to fill in any
+        missing padding zones.
+    :return: A tensor with the same number of specified sampled dimensions, and with that many local dimensions
+        tacked on.
     """
 
     # Perform primary validation
@@ -474,15 +506,15 @@ def local_sample(
     elif mode == "pad":
         return padded_local_sample(tensor, start, end,
                                    stride, dilation, offset)
-    elif mode == "circular":
+    elif mode == "replicate":
         return circular_local_sample(tensor, start, end,
                                      stride, dilation, offset)
     else:
         reason = f"""\
         It was expected that the local sampling
         function would be provided with a mode among
-        'native', 'pad', or 'circular'. However, instead
-        recieved '{mode}'. This is not allowed
+        'native', 'pad', or 'replication'. However, instead
+        received '{mode}'. This is not allowed
         """
         reason = Core.dedent(reason)
         raise LocalError(reason, task)

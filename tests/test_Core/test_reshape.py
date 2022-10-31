@@ -10,6 +10,7 @@ import torch
 
 import src.supertransformerlib.Core.Errors
 import src.supertransformerlib.Core.Functions
+import src.supertransformerlib.Core as Core
 from src.supertransformerlib.Core import Reshape
 from torch.nn import functional
 
@@ -132,3 +133,16 @@ class test_sparse_reshape(unittest.TestCase):
         tensor.sum().backward()
         self.assertTrue(tensor.grad != None)
 
+    def test_hybrid_sparse_reshape(self):
+        tensor = torch.randn([10, 9, 8, 7])
+
+        mask = torch.rand([10, 9, 8]) > 0.5
+        index = Core.gen_indices_from_mask(mask)
+        values = tensor[mask]
+        sparse_tensor = torch.sparse_coo_tensor(index, values)
+
+        initial_shape = [9, 8]
+        final_shape = [72]
+
+        reshaped_tensor = Reshape.reshape(sparse_tensor, initial_shape, final_shape)
+        print(reshaped_tensor.shape)

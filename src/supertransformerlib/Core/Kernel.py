@@ -31,7 +31,8 @@ class KernelSetupError(Errors.ValidationError):
 
 def make_dense_superposition(dynamics: torch.Tensor,
                              kernel: torch.Tensor,
-                             dynamic_shape: torch.Tensor) -> torch.Tensor:
+                             dynamic_shape: torch.Tensor,
+                             task: Optional[str]) -> torch.Tensor:
     """
     Makes a superposition of the kernel out of the dynamics weights
     """
@@ -55,7 +56,8 @@ torch.jit.script(make_dense_superposition)
 
 def make_sparse_superposition(dynamics: torch.Tensor,
                               kernel: torch.Tensor,
-                              shape: torch.Tensor):
+                              shape: torch.Tensor,
+                              task: Optional[str]):
     """
     Make a superposition out of the kernel when the dynamic
     weights are sparse. The ones which are not present are
@@ -74,7 +76,7 @@ def make_sparse_superposition(dynamics: torch.Tensor,
     length = shape.shape[0]
     input_shape = shape
     output_shape = torch.tensor([int(shape.prod())])
-    dynamics = Reshape.reshape(dynamics, input_shape, output_shape, task="flattening sparse dynamic tensor")
+    dynamics = Reshape.reshape(dynamics, input_shape, output_shape, task=task)
     kernel = kernel.flatten(0, length - 1)
 
     # Resize the dynamic dimensions. expand the values where needed so
@@ -215,12 +217,14 @@ class Parameter(nn.Module):
                 raise KernelSetupError(reason, task, superposition_weights, self.Parameter)
 
             interesting_length = self.Superposition_Shape.shape[0]
-            size = torch.Size(Functions.shape_to_List(self.Superposition_Shape))
+            size = torch.Size(Functions.get_shape_as_list(self.Superposition_Shape))
             if superposition_weights.shape[:interesting_length] != size:
                 if superposition_weights.shape[-interesting_length:] == size:
                     front = torch.tensor(superposition_weights.shape[:-interesting_length], dtype=torch.int64)
                     back = torch.tensor(superposition_weights.shape[-interesting_length:], dtype=torch.int64)
-                    right_shape = torch.Size(torch.concat([back, front], dim=0))
+                    error_shape = Functions.get_shape_as_list(torch.concat([back, front], dim=0))
+                    right_shape = torch.Size(error_shape)
+
 
                     reason = f"""\
                     The superposition weights are almost valid. Due to limitations with 
@@ -228,7 +232,7 @@ class Parameter(nn.Module):
                     the weight dimensions. 
                     
                     You provided a tensor '{weights_name}' of shape {torch.Size(superposition_weights.shape)} which
-                    is attempting to build the superposition defined by {torch.Size(self.Superposition_Shape)}. However, 
+                    is attempting to build the superposition defined by {torch.Size(Functions.get_shape_as_list(self.Superposition_Shape))}. However, 
                     it is the case that the tensor should have in fact had a shape of {right_shape}. That is, 
                     the superposition should have been defined, then the batch elements. 
                     
@@ -240,9 +244,11 @@ class Parameter(nn.Module):
                     reason = StringUtil.dedent(reason)
                     raise KernelSetupError(reason, task, superposition_weights, self.Parameter)
                 else:
+                    shaping = Functions.get_shape_as_list(self.Superposition_Shape)
+
                     reason = f"""\
                     The kernel is being built with an expected weight dynamic_shape 
-                    of {torch.Size(self.Superposition_Shape)}. However, it is the 
+                    of {torch.Size(shaping)}. However, it is the 
                     the case provided parameter '{weights_name}' under the forward
                     call had a size of {superposition_weights.shape}.
                     
@@ -278,7 +284,9 @@ class Parameter(nn.Module):
                 raise KernelSetupError(reason, task, superposition_weights, self.Parameter)
 
             # Do either sparse or dense superposition construction
+            if task is not None:
+                task = task + ": Superimposing using superposition weights"
             if superposition_weights.is_sparse:
-                return make_sparse_superposition(superposition_weights, self.Parameter, self.Superposition_Shape)
+                return make_sparse_superposition(superposition_weights, self.Parameter, self.Superposition_Shape, task)
             else:
-                return make_dense_superposition(superposition_weights, self.Parameter, self.Superposition_Shape)
+                return make_dense_superposition(superposition_weights, self.Parameter, self.Superposition_Shape, task)

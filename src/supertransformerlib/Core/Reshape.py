@@ -46,13 +46,14 @@ def validate_sparse_reshape(tensor: torch.Tensor,
     sparse_shape = tensor.shape[:sparse_dim]
     input_shape_as_list: List[int] = input_shape.tolist() #Line required to prevent torchscript from throwing a fit
     if sparse_shape[-reshape_dim:] != torch.Size(input_shape_as_list):
-        temp_input_shape = torch.Size(input_shape)
-        tensor_shape = sparse_shape[-reshape_dim:]
+        temp_input_shape = torch.Size(input_shape_as_list)
         reason = f"""\
         Param 'tensor' mutable shape and param 'input_shape' mutable shape do not match:
-        The param 'tensor' has dynamic_shape {tensor_shape}.
-        This cannot be broadcast with {temp_input_shape}.
         
+        The param 'tensor' has a shape of {tensor.shape}. Of these, the dimensions
+        which will be targetted by the sparse reshape are {sparse_shape}. The reshape
+        instruction we were provided with was to work with something which has last
+        sparse dimensions of shape {temp_input_shape}. This was not compatible
         """
         reason = StringUtil.dedent(reason)
         raise ReshapeException(reason, task)
@@ -245,5 +246,22 @@ def reshape(tensor: torch.Tensor,
             validate_dense_reshape(tensor, input_shape, output_shape, task)
         return dense_reshape(tensor, input_shape, output_shape)
 
+class Reshape(nn.Module):
+    """
+    A layer to perform the same reshape
+    operation over and over. It also save
+    and scripts nicely.
+    """
+    def __init__(self,
+                 initial_shape: Functions.StandardShapeType,
+                 final_shape: Functions.StandardShapeType):
+        super().__init__()
 
+        initial_shape = Functions.standardize_shape(initial_shape, 'initial_shape', task="setting up reshape")
+        final_shape = Functions.standardize_shape(final_shape, 'final_shape', task='setting up reshape')
+
+        self.register_buffer('input_shape', initial_shape)
+        self.register_buffer('output_shape', final_shape)
+    def forward(self, tensor: torch.Tensor, task: Optional[str] = None)->torch.Tensor:
+        return reshape(tensor, self.input_shape, self.output_shape, task=task)
 
