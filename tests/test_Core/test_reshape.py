@@ -11,7 +11,7 @@ import torch
 import src.supertransformerlib.Core.Errors
 import src.supertransformerlib.Core.Functions
 import src.supertransformerlib.Core as Core
-from src.supertransformerlib.Core import Reshape
+import src.supertransformerlib.Core.Reshape as Reshape
 from torch.nn import functional
 
 
@@ -108,7 +108,6 @@ class test_sparse_reshape(unittest.TestCase):
         final_shape = torch.tensor([20])
 
         sparse_tensor = tensor.to_sparse_coo()
-
 
         sparse_reshaped = Reshape._sparse_reshape(sparse_tensor, initial_shape, final_shape)
         dense_reshape = Reshape.reshape(tensor, initial_shape, final_shape)

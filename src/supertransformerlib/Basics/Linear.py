@@ -435,8 +435,8 @@ class Linear(nn.Module):
         self.parallel = parallel
         self.dynamic = dynamic
 
-        self.input_map = Core.Reshape(input_shape, input_shape.prod().unsqueeze(-1))
-        self.output_map = Core.Reshape(output_shape.prod().unsqueeze(-1), output_shape)
+        self.input_map = Core.Reshape_Layer(input_shape, input_shape.prod().unsqueeze(-1))
+        self.output_map = Core.Reshape_Layer(output_shape.prod().unsqueeze(-1), output_shape)
         self.expected_input_shape = input_shape
 
         self.kernel = make_kernel(input_shape, output_shape, parallel, dynamic, device, dtype)

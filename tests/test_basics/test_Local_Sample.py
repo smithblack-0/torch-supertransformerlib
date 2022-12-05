@@ -517,6 +517,7 @@ class test_padded_cases(unittest.TestCase):
         offsets = torch.cartesian_prod(*offsets).unbind(0)
 
         options = list(itertools.product(starts, ends, strides, dilations, offsets))
+        options = random.sample(options, 10000)
         numcases = len(options)
         print("testing %s possibilities" % numcases)
         counter = 0

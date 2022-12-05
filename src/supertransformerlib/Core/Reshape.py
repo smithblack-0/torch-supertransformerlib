@@ -246,7 +246,7 @@ def reshape(tensor: torch.Tensor,
             validate_dense_reshape(tensor, input_shape, output_shape, task)
         return dense_reshape(tensor, input_shape, output_shape)
 
-class Reshape(nn.Module):
+class Reshape_Layer(nn.Module):
     """
     A layer to perform the same reshape
     operation over and over. It also save

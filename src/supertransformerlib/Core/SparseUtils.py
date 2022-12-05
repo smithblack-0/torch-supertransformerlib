@@ -74,3 +74,12 @@ def convert_dense_to_hybrid(tensor: torch.Tensor, mask: torch.Tensor)->torch.Ten
 
 torch.jit.script(convert_dense_to_hybrid)
 
+def make_sparse_using_mask(tensor: torch.Tensor, mask: torch.Tensor)->torch.Tensor:
+    """
+    Creates a torch sparse COO tensor using a tensor and a similarly
+    sized mask. It is assumed the mask is not hybrid or similar.
+
+    :param tensor: The tensor to make a sparse copy of.
+    :param mask:
+    :return:
+    """

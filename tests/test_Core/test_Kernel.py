@@ -29,13 +29,13 @@ class testKernelSuperposition(unittest.TestCase):
 
         #Standard
 
-        output = Kernel.make_dense_superposition(dynamics, kernel, dynamic_shape)
+        output = Kernel.make_dense_superposition(dynamics, kernel, dynamic_shape, None)
         self.assertTrue(output.shape == expected_shape)
 
         #Torchscript
 
         function = torch.jit.script(Kernel.make_dense_superposition)
-        output = function(dynamics, kernel, dynamic_shape)
+        output = function(dynamics, kernel, dynamic_shape, None)
         self.assertTrue(output.shape == expected_shape)
 
     def test_sparse_superposition(self):
@@ -54,7 +54,7 @@ class testKernelSuperposition(unittest.TestCase):
 
         #Standard
 
-        output = Kernel.make_sparse_superposition(sparse_dynamics, kernel, dynamic_shape)
+        output = Kernel.make_sparse_superposition(sparse_dynamics, kernel, dynamic_shape, None)
         self.assertTrue(output.shape == expected_shape)
         self.assertTrue(output.is_sparse == False)
 
@@ -71,7 +71,7 @@ class testKernelSuperposition(unittest.TestCase):
         sparse_dynamics = torch.sparse_coo_tensor(indices, values, size=hybrid_shape).coalesce()
 
         func = torch.jit.script(Kernel.make_sparse_superposition)
-        output = func(sparse_dynamics, kernel, dynamic_shape)
+        output = func(sparse_dynamics, kernel, dynamic_shape, None)
         self.assertTrue(output.shape == expected_shape)
         self.assertTrue(output.is_sparse == False)
 

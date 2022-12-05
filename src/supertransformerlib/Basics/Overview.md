@@ -1,5 +1,4 @@
+Required developments
 
-
-* Superposition
-* Interconnection
-* Ingress
+* Sampling
+* Local layer and control.
