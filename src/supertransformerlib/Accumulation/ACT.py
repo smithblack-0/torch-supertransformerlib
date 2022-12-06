@@ -2,10 +2,8 @@
 
 A mechanism for performing adaptive computation time.
 
-Adaptive computation time is quite useful to allowing
-extra time when needed to think about a problem. It uses
-halting probabilities to determine when a particular
-element is "halted"
+Generally, the point behind these entities is that
+they will keep haltable elements syncronized.
 
 """
 
@@ -15,7 +13,7 @@ from torch import nn
 from typing import Optional, List, Tuple
 
 
-class HaltingInitException(Core.ValidationError):
+class ACT_Exception(Core.ValidationError):
     """
     An error for problems encountered when doing halting
     initialization.
@@ -24,7 +22,7 @@ class HaltingInitException(Core.ValidationError):
     def __init__(self,
                  reason: str,
                  ):
-        type = "HaltingInitException"
+        type = "ACT_Exception"
         super().__init__(type, reason)
 
 class BatchSpec:
@@ -34,8 +32,8 @@ class BatchSpec:
     of this batch are.
     """
     def __init__(self,
-                 halting_shape: Core.StandardShapeType,
                  batch_shape: Core.StandardShapeType,
+                 halting_shape: Core.StandardShapeType,
                  device: torch.device = None,
                  dtype: torch.dtype = None):
 
@@ -44,8 +42,6 @@ class BatchSpec:
         self.total_shape = torch.concat([self.batch_shape, self.halting_shape])
         self.device = device
         self.dtype = dtype
-
-
 class ponderAccumulator:
     """
     Accumulates information on the remainders and ponder
@@ -70,14 +66,27 @@ class ponderAccumulator:
         self.remainder = torch.zeros(shape_as_list, device=spec.device, dtype=spec.dtype)
         self.count = torch.zeros(shape_as_list, device=spec.device, dtype=torch.int64)
 
-class haltingAccumulator:
+class haltingLattice:
     """
-    Accumulates information on the halting
-    probability and can display when something is halted
+    Concetually the haltingLattice tracks a lattice point
+    for each element on each batch. These latticepoints
+    represent the current halting probability. This probability
+    can be updated, the unhalted elements may be checked, and other
+    operations related to the halting state for the latticepoints
+    exist.
+
+    * It clamps the probabilities such that the total probability will not go above one
+      when requested. This will also spit out remainders.
+    * When it's update feature is called, it updates the internal probabilities
     """
     @property
-    def unhalted_elements(self):
+    def unhalted_elements(self)->torch.Tensor:
         return self.halting_probability < 1 - self.epsilon
+    @property
+    def unhalted_batches(self)->torch.Tensor:
+        batch_length = self.spec.batch_shape.shape[0]
+        flattened_elements = self.unhalted_elements.flatten(batch_length)
+        return torch.any(flattened_elements, dim=-1)
     @property
     def is_halted(self)->bool:
         if self.unhalted_elements.sum() == 0:
@@ -93,6 +102,15 @@ class haltingAccumulator:
             probability for each element of the spec.
         :returns: **clamped probabilities**, **residuals**
         """
+        if halting_probabilities.shape != self.halting_probability.shape:
+            reason = f"""\
+            The batchspec was defined to have total shape 
+            {self.halting_probability.shape}. 
+            However, passed parameter halting_probabilities
+            had shape {halting_probabilities.shape}
+            """
+            reason = Core.dedent(reason)
+            raise ACT_Exception(reason)
 
         probability_needs_remainder = halting_probabilities + self.halting_probability >= 1 - self.epsilon
         remainder = 1 - self.halting_probability #TODO: Should we stop calculating after one remainder return?
@@ -112,146 +130,54 @@ class haltingAccumulator:
         :param halting_probabilities: The halting probabilities
         :return: True if all elements are halted. False otherwise.
         """
+        if halting_probabilities.shape != self.halting_probability.shape:
+            reason = f"""\
+            The batchspec was defined to have total shape 
+            {self.halting_probability.shape}. 
+            However, passed parameter halting_probabilities
+            had shape {halting_probabilities.shape}
+            """
+            reason = Core.dedent(reason)
+            raise ACT_Exception(reason)
+
         self.halting_probability += halting_probabilities
 
     def __init__(self,
                  spec: BatchSpec,
                  epsilon: float = 0.001):
+
+        assert epsilon >= 0
         shape_as_list: List[int] = spec.total_shape.tolist()
         self.halting_probability = torch.zeros(shape_as_list, device=spec.device, dtype=spec.dtype)
         self.epsilon = epsilon
+        self.spec = spec
+    def __call__(self)->torch.Tensor:
+        return self.halting_probability
 
 class stateAccumulator:
     """
-    Accumulates state information using the halting
-    probabilities to encourage superposition.
+    Accumulates state information matching a pattern
+    defined by the spec. A shape of zero will exactly
+    match the spec 1-1. A shape of, for example, 10
+    will place an embedding dimension of length ten
+    onto the accumulator.
+
+    The accumulator starts with a tensor of zeros. Then,
+    every time it is updated, it adds the update into the
+    tensor.
     """
-    def __init__(self, tensor: torch.Tensor):
-
-class HaltState:
-    """
-
-    The purpose of this class is to track the cumulative
-    halting probabilities, display information based on it,
-    and provide modifications in the event of clamping being required.
-
-    This code supports a flavor of adaptive computation time. Read
-    that paper if supporting.
-
-    The class is initialized by defining halting and batch shape
-    when running the constructor. Optionally, a mask of halting shape
-    may be provided as well.
-
-    Once initialized, the class then has a data role, and a
-    logical role to perform. The data role is to display the
-    unhalted_mask, is_fully_halted, and unhalted_index fields.
-    Meanwhile, the logical role is to accept halting updates,
-    in one of two formats, and use that to update the data fields.
-    External code is expected to read the fields to gain insight
-    and perform operations.
-
-    As it is immediately logically relevant, it is the case that
-    the halting probabilities, which may have been "trimmed" producing
-    residuals, are returned when an update is run. These returned
-    probabilities should be utilized in further update actions.
-
-    ---- fields ----
-
-    * is_all_halted: True only if every coordinate tracked has reached a halted state.
-
-    * halted_mask: A mask which is true if the corrolated coordinate has halted
-    * halted_batches: A mask which addresses only the batch dimensions, and is true if
-      all elements within the batch has halted
-
-    * unhalted_mask: A mask which is true if the corrolated coordinate is not halted
-    * unhalted_batches: A mask which addresses only the batch dimensions, and is true if
-      all elements within the batch are not halted.
-
-    * Residual: Collected automatically when reaching a halted state. Useful for training
-
-
-    halting_shape
-    batch_shape
-    total_shape
-    """
-
-    @property
-    def is_completely_halted(self):
-        return torch.all(self.halted_mask)
-
-    @property
-    def halted_mask(self) -> torch.Tensor:
-        return self.halting_probabilities >= 1 - self.epsilon
-
-    @property
-    def halted_batches(self) -> torch.Tensor:
-        batch_length = self.batch_shape.shape[0]
-        flat_mask = self.halted_mask.flatten(batch_length, -1)
-        output = torch.all(flat_mask, dim=-1)
-        return output
-
-    @property
-    def unhalted_mask(self) -> torch.Tensor:
-        return torch.logical_not(self.halted_mask)
-
-    @property
-    def unhalted_batches(self) -> torch.Tensor:
-        return torch.logical_not(self.halted_batches)
-
     def __init__(self,
-                 halting_shape: Core.StandardShapeType,
-                 batch_shape: Core.StandardShapeType,
-                 halting_epsilon: float = 0.001,
-                 halted_mask: Optional[torch.Tensor] = None,
-                 dtype: Optional[torch.dtype] = None,
-                 device: Optional[torch.device] = None):
-        """
-
-        :param halting_shape: The shape of the halting dimension.
-        :param batch_shape: The shape of the batch dimension.
-        :param halted_mask: Optional. Of shape [batch_shape, halting_shape].
-            Manually defines each entry as either "halted" (true) or "unhalted"
-            "false"
-        :param dtype: The floating point dtype the halting probabilities are in
-        :param device: The device to build the class on.
-        """
-
-        if dtype is None:
-            dtype = torch.float32
-
-        halting_shape = Core.standardize_shape(halting_shape, "halting_shape")
-        batch_shape = Core.standardize_shape(batch_shape, "batch_shape")
-        total_shape = torch.concat([batch_shape, halting_shape])
-
-        # Create halting probabilities containers
-        #
-        # This means the halting probabilities and
-        # batch residual containers
-
-        if halted_mask is not None:
-            # We convert to list, then to tuple, to make torchscript happy.
-            shape_as_list: List[int] = total_shape.tolist()
-            shape_as_tuple = torch.Size(shape_as_list)
-            if shape_as_tuple != halted_mask.shape:
-                reason = f"""\
-                It is the case that the halted_mask and the
-                total shape should be the same. However, it was found
-                that the halted_ mask had shape {halted_mask.shape} while
-                the total shape was {total_shape}
-                """
-                reason = Core.dedent(reason)
-                raise HaltingInitException(reason)
-
-            halting_probabilities = halted_mask.to(dtype=dtype, device=device)
-            residuals = torch.zeros(batch_shape, dtype=dtype, device=device)
+                 spec: BatchSpec,
+                 shape: Core.StandardShapeType):
+        shape = Core.standardize_shape(shape, "shape", allow_zeros=True)
+        shape_as_list: List[int] = spec.total_shape.tolist()
+        if shape == 0:
+            state = torch.zeros(shape_as_list, device=spec.device, dtype=spec.dtype)
         else:
-            halting_probabilities = torch.zeros(total_shape, dtype=dtype, device=device)
-            residuals = torch.zeros(batch_shape, dtype=dtype, device=device)
-
-        self.halting_shape = halting_shape
-        self.epsilon = halting_epsilon
-        self.batch_shape = batch_shape
-        self.total_shape = total_shape
-        self.halting_probabilities = halting_probabilities
-        self.residuals = residuals
+            update_as_list: List[int] = shape.tolist()
+            shape_as_list = shape_as_list + update_as_list
+            state = torch.zeros(shape_as_list, device=spec.device, dtype=spec.dtype)
+        self.state = state
+    def update(self, tensor: torch.Tensor):
+        self.state += tensor
 
