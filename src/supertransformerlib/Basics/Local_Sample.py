@@ -518,9 +518,3 @@ def local_sample(
         """
         reason = Core.dedent(reason)
         raise LocalError(reason, task)
-
-
-class Local(nn.Module):
-    """
-    A layer for performing local sampling. 
-    """
