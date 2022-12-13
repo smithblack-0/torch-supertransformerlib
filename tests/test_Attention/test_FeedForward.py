@@ -1,0 +1,31 @@
+import unittest
+
+import torch
+
+from src.supertransformerlib import Attention
+
+
+class test_Feedforward(unittest.TestCase):
+    def test_straightforward(self):
+        """Test feedforward works without any tricks"""
+        test_tensor = torch.randn([10, 20, 4, 16])
+        factory = Attention.feedForwardFactory(16)
+        factory = torch.jit.script(factory)
+
+        layer = factory()
+
+        self.assertTrue(layer(test_tensor).shape == torch.Size([10, 20, 4, 16]))
+        self.assertTrue(torch.any(layer(test_tensor) != test_tensor))
+
+    def test_parallel(self):
+        """ Test the parallel processing system is engaging"""
+        test_tensor = torch.randn([10, 20, 4, 16])
+
+        factory = Attention.feedForwardFactory(16, parallel=[10, 20])
+        factory = torch.jit.script(factory)
+
+        layer = factory()
+
+        output = layer(test_tensor)
+        self.assertTrue(output.shape == torch.Size([10, 20, 4, 16]))
+        self.assertTrue(torch.any(output != test_tensor))

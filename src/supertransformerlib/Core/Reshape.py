@@ -246,11 +246,28 @@ def reshape(tensor: torch.Tensor,
             validate_dense_reshape(tensor, input_shape, output_shape, task)
         return dense_reshape(tensor, input_shape, output_shape)
 
-class Reshape_Layer(nn.Module):
+class ReshapeClosure:
     """
     A layer to perform the same reshape
     operation over and over. It also save
     and scripts nicely.
+    """
+    def __init__(self,
+                 initial_shape: Functions.StandardShapeType,
+                 final_shape: Functions.StandardShapeType,
+                 task: Optional[str]):
+
+        self.initial_shape = initial_shape
+        self.final_shape = final_shape
+        self.task = task
+    def __call__(self, tensor: torch.Tensor)->torch.Tensor:
+        return reshape(tensor, self.initial_shape, self.final_shape, task=self.task)
+
+class ReshapeFactory(nn.Module):
+    """
+    A factory to generate modules to perform reshape.
+
+    It also saves and loads nicely.
     """
     def __init__(self,
                  initial_shape: Functions.StandardShapeType,
@@ -262,6 +279,5 @@ class Reshape_Layer(nn.Module):
 
         self.register_buffer('input_shape', initial_shape)
         self.register_buffer('output_shape', final_shape)
-    def forward(self, tensor: torch.Tensor, task: Optional[str] = None)->torch.Tensor:
-        return reshape(tensor, self.input_shape, self.output_shape, task=task)
-
+    def forward(self, task: Optional[str] = None)->ReshapeClosure:
+        return ReshapeClosure(self.input_shape, self.output_shape, task=task)

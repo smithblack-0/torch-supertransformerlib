@@ -11,7 +11,7 @@ mechanism is sane
 
 import unittest
 import torch
-import src.supertransformerlib.Accumulation.Accumulators as Accumulators
+import src.supertransformerlib.Structures.Accumulators as Accumulators
 import src.supertransformerlib.Core as Core
 class test_Halting_Lattice(unittest.TestCase):
     """

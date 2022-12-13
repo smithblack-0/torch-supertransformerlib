@@ -2,63 +2,12 @@ import unittest
 import torch
 
 from src.supertransformerlib import Attention
-from src.supertransformerlib import Core
+
 
 def shape_equal(shape1, shape2):
     shape1 = torch.tensor(shape1)
     shape2 = torch.tensor(shape2)
     return torch.all(shape1 == shape2)
-
-
-class test_dotproductattention(unittest.TestCase):
-    """
-    Tests the dot product attention function loose in the
-    function module.
-    """
-    def test_basic_dotproductattn(self):
-        """Tests if a random, no frills case works safely."""
-        query = torch.randn([3, 5, 10, 20])
-        content = torch.randn([3, 5, 30, 20])
-        attn = Attention._dot_product_attention(query, content, content)
-
-    def test_masked_dotproductattn(self):
-        """ tests if a masked case functions correctly """
-        query = torch.randn([3, 5, 10, 20])
-        content = torch.randn([3, 5, 30, 20])
-        mask = torch.randn([10, 30]) > 0.5
-        attn = Attention._dot_product_attention(query, content, content, mask)
-
-    def test_torchscript_compile(self):
-        test = torch.jit.script(Attention._dot_product_attention)
-
-    @unittest.skipUnless(torch.cuda.is_available(), "gpu test requires valid gpu install")
-    def test_gpu(self):
-        """ tests if the gpu runs okay """
-        device = torch.device("cuda")
-        query = torch.randn([3, 5, 10, 20]).to(device)
-        content = torch.randn([3, 5, 30, 20]).to(device)
-        mask = (torch.randn([10, 30]) > 0.5).to(device)
-        attn = Attention._dot_product_attention(query, content, content, mask)
-
-
-class test_Feedforward(unittest.TestCase):
-    def test_straightforward(self):
-        """Test feedforward works without any tricks"""
-        test_tensor = torch.randn([10, 20, 4, 16])
-        instance = Attention.FeedForward(16)
-        instance = torch.jit.script(instance)
-        self.assertTrue(instance(test_tensor).shape == torch.Size([10, 20, 4, 16]))
-        self.assertTrue(torch.any(instance(test_tensor) != test_tensor))
-
-    def test_parallel(self):
-        """ Test the parallel processing system is engaging"""
-        test_tensor = torch.randn([10, 20, 4, 16])
-        instance = Attention.FeedForward(16, parallelization=[10, 20])
-        instance = torch.jit.script(instance)
-        output = instance(test_tensor)
-        self.assertTrue(output.shape == torch.Size([10, 20, 4, 16]))
-        self.assertTrue(torch.any(output != test_tensor))
-
 
 
 class test_MultiHeadedAttention(unittest.TestCase):

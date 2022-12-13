@@ -11,19 +11,11 @@ three distinct steps. These are
 * Executing the Closure with whatever is so desired.
 
 """
-from typing import Optional, Dict
-from collections import namedtuple
-
+from typing import Optional, List
 import torch
-
 import src.supertransformerlib.Core.Errors as Errors
 import src.supertransformerlib.Core.Functions as Functions
-import src.supertransformerlib.Core.StringUtil as StringUtil
-import src.supertransformerlib.Core.Reshape as Reshape
-from src.supertransformerlib.Core import Reshape
 from src.supertransformerlib import Core
-
-
 from torch import nn
 
 
@@ -184,9 +176,8 @@ torch.jit.script(linear_forward)  # noqa
 def make_kernel(input_shape: torch.Tensor,
                 output_shape: torch.Tensor,
                 parallel: Optional[torch.Tensor],
-                dynamic: Optional[torch.Tensor],
                 device: Optional[torch.device],
-                dtype: Optional[torch.dtype]) -> Core.Parameter:
+                dtype: Optional[torch.dtype]) -> nn.Parameter:
     """
     Makes the required kernel usable for performing
     linear operations in a particular situation.
@@ -208,215 +199,163 @@ def make_kernel(input_shape: torch.Tensor,
     if parallel is not None:
         shape = torch.concat([parallel, shape])
 
-    init = torch.nn.init.kaiming_uniform_
-    parameter = Core.Parameter(init, shape, dynamic, dtype=dtype, device=device)
+    shape_as_list: List[int] = shape.tolist() # Required by torchscript
+    parameter = torch.empty(shape_as_list, dtype = dtype, device =device)
+    nn.init.kaiming_uniform_(parameter)
+    parameter = nn.Parameter(parameter)
     return parameter
 
 
 def make_bias(output_shape: torch.Tensor,
               parallel: Optional[torch.Tensor],
-              dynamic: Optional[torch.Tensor],
               device: Optional[torch.device],
-              dtype: Optional[torch.dtype]) -> Core.Parameter:
-    """
-    Makes the required bias usable for performing
-    linear operations in a particular situation.
-
-    Dimensions are defined, from left to right, in terms of
-    (dynamic_dims..., parallel_dims..., output_shape)
-
-
-    :param output_shape: The expected input dynamic_shape
-    :param parallel: The number of parallel dimensions
-    :param dynamic: The number of dynamic dimensions
-    :return: The matmul kernel
-    """
+              dtype: Optional[torch.dtype]) -> nn.Parameter:
 
     matrix_columns = output_shape.prod().unsqueeze(-1)
     shape = matrix_columns
     if parallel is not None:
         shape = torch.concat([parallel, shape])
 
-    init = torch.nn.init.zeros_
-    parameter = Core.Parameter(init, shape, dynamic, dtype=dtype, device=device)
+    shape_as_list: List[int] = shape.tolist() # Required by torchscript
+    parameter = torch.zeros(shape_as_list, dtype=dtype, device=device)
+    parameter = nn.Parameter(parameter)
     return parameter
 
-
-
-
-
-class Linear(nn.Module):
+class _Linear:
     """
-    The core linear layer. Used in almost all other reasonable work. Performs
-    matrix multiplication plus add. But has a lot of additional tricks
-    associated with it.
+    The core linear forward operation
 
-    --- Tricks ----
+    Will apply a linear transform to an incoming
+    tensor. Will also throw errors on violations.
 
-    A number of additional tricks are included in the linear layer
-    operation. These include, but are not restricted only to,
+    It is produced by linear factory, and should
+    be configured in that class.
+    """
+    def __init__(self,
+                 input_reshape: Core.ReshapeClosure,
+                 kernel: torch.Tensor,
+                 bias: Optional[torch.Tensor],
+                 output_reshape: Core.ReshapeClosure
+                 ):
+        self.inputReshape = input_reshape
+        self.kernel = kernel
+        self.bias = bias
+        self.outputReshape = output_reshape
+    def __call__(self, tensor: torch.Tensor)->torch.Tensor:
+        tensor = self.inputReshape(tensor)
+        tensor = linear_forward(tensor, self.kernel, self.bias)
+        tensor = self.outputReshape(tensor)
+        return tensor
 
-    * Autoreshaping
-    * Parallel Kernels
-    * Dynamic Superposition
+torch.jit.script(_Linear)
+class LinearFactory(nn.Module):
+    """
+    The core linear factory. Used in many other products.
+    Produces a linear closure class when called, capable of applying
+    the linear operation. Displays typing of closure class as well
+
+
+    ---- Design ----
+
+    The basic idea is that you will go ahead and use the factory
+    layer to make a linear operation for a particular batch.
+
 
     ---- Basics ----
 
-    It is assumed the programmer working with this class
-    has some level of familiarity with torch's or another
-    libraries linear layer.
-
-    One may setup and use a Linear layer presented
-    here just like any ol' layer in torch.
+    To use the class, one must first setup the closure and
+    then the closure can be utilized. As an example, consider
+    projecting tensor [10, 4] to [10, 7].
 
     ```
-        tensor = torch.randn([10])
+        test_tensor = torch.rand([10, 4])
 
-        layer = Basics.Linear(10, 5)
-        output = layer(tensor)
+        linearFactory = Basics.LinearFactory(4, 7)
+        linear = linearFactory()
+
+        output = linear(test_tensor)
+        print(output.shape) # will be [10, 7]
     ```
 
-    Batched tensors are also processed sanely
+    ---- Tricks ----
+
+    There are a number of useful tricks to be aware of.
+
+    * Autoreshaping
+    * Parallel Kernels
+    * Torchscript Compatibility
+    * Functional Passthrough
+    ---- Autoreshaping ----
+
+    It is quite possible to demand the linear operation
+    transform an entire block from one shape to another. Such
+    an action is called autoreshaping. It consists of flattening the
+    targetted dimensions, performing linear, then restoring.
+
+    For example, consider transforming a tensor of shape [4, 5, 10] to [4, 3]:
 
     ```
-        tensor = torch.randn([5, 10])
+        test_tensor = torch.rand([4, 5, 10])
 
-        layer = Basics.Linear(10, 5)
-        output = layer(tensor)
+        linearFactory = Basics.LinearFactory([5, 10], 3)
+        linear = linearFactory()
+
+        output = linear(test_tensor)
+        print(output.shape) # Will be [4, 3]
     ```
 
-    Notably, there is no theoredical limit to how many batch dimensions
-    can be processed at once
+    ---- Parallel execution ----
 
-        ```
-        tensor = torch.randn([20, 30, 7, 5, 10])
+    It is also possible to dedicate unique blocks of parameters
+    to different dimensions. This is called utilizing parallel
+    kernels, and might be useful for making, for example, ensembles.
 
-        layer = Basics.Linear(10, 5)
-        output = layer(tensor)
-    ```
-
-    It is possible to do additional actions, such as ignoring bias,
-    defining the device and dtype of the kernel, and more on initialization.
-
-    ---- Torchscript passing ----
-
-    A setup closure can be passed around through torchscript for
-    later usage. This allows modularization of code. The type
-    of the closure is located on the layer as parameter "ClosureType"
-
-    A bare bones example looks something like as follows:
+    Consider an example with a tensor mapping from [4, 2, 5, 10] to
+    [4, 2, 5, 20]. 4 is the batch dimension. [2,5] is the ensemble dimension, and we
+    want each one to be different.
 
     ```
-        tensor = torch.randn([10])
+        test_tensor = torch.rand([4, 5, 10])
+
+        linearFactory = Basics.LinearFactory(10, 20, [2, 5])
+        linear = linearFactory()
+
+        output = linear(test_tensor) # each dimension among [2, 5] has independent parameters
+    ```
+
+    ---- torchscript compatibility ----
+
+    The program is defined such that it is possible to use torchscript with
+    it. Additionally, one can pass a factory entity into a class or function
+    using the right typing hint. This exists in large part to allow some
+    degree of object-oriented programming.
+
+    ```
+        test_tensor = torch.rand([10, 4])
+
+        linearFactory = Basics.LinearFactory(4, 20)
 
         @torch.jit.script
-        def do_linear(tensor: torch.Tensor, closure: Linear.ClosureType):
-            return closure(tensor)
+        def apply_later(linear: linearFactory.Type, tensor: torch.Tensor):
+            return linear(tensor)
 
-        layer = Linear(10, 5)
-        closure = layer()
-        output = do_linear(tensor, closure)
+        #... later
+
+        linear = linearFactory()
+        output = apply_later(linear, test_tensor)
     ```
 
-    More sophisticated constructions are also possible
 
-    ---- Autoreshaping ---
-
-    It is the case one can define a projection to occur and the layer
-    will automatically reshape to match. This consists of flattening along
-    these dimensions, then performing a linear operation
-
-    For example, say you want to project a tensor with dynamic_shape
-    [3, 5, 6] into a tensor with dynamic_shape [3, 3, 2].  The first dimension
-    is a batch dimension. This can be done as:
-
-    ```
-        tensor = torch.randn([3, 5, 6])
-        input_shape = [5, 6]
-        output_shape = [3, 2]
-
-        layer = Linear(input_shape, output_shape)
-        output = layer(tensor)
-        assert output.shape == torch.Size([3, 3, 2])
-    ```
-
-    Conceptually, what is going on is the projected dimensions are
-    flattened, run as a standard linear operation, and then
-    reassembled.
-
-    ----- parallel kernels -----
-
-    It is the case ensembles can also be elegantly handled using this
-    linear layer. That is the purpose of the parallel parameter.
-
-    Lets say you have a matmul from 10 to 5  with batch size 20, which you want to apply
-    in parallel with 10 independent ensembles. This can easily be done
-
-    ```
-
-        tensor = torch.randn([20, 10, 10])
-
-        layer = Basics.Linear(10, 5, parallel=10)
-        output = layer(tensor)
-    ```
-
-    This is not the limit, however. If multiple dimensions
-    worth of ensembles are needed, for whatever reason, that is also
-    supported. Suppose you want one ensemble for every location on a
-    7 by 7 grid, and your data is coming in binned by x and y.
-
-    This would be supported as
-
-    ```
-
-    data = torch.randn([20, 7, 7, 10])
-
-    layer = Basics.Linear(10, 5, parallel=[7, 7])
-    output = layer(data)
-    ```
-
-    ------ dynamic superposition ------
-
-    By far the most difficult to understand feature is dynamic superposition.
-
-    If you have exposure to quantum mechanics, this will be quick and easy. Dynamic Superposition
-    sets up ensembles using the 'superposition_shape' parameter on initialization. Then, on call,
-    a "superposition_weight" parameter is defined which acts as weights on each kernel, which
-    are then superimposed together and executed in one go. Those who have taken quantum mechanics
-    can now leave.
-
-    If you have exposure to mathematics or advanced tensor mechanics, we can also get through
-    this fairly quick. The superposition_weights will have their dot product taken with regards
-    to the superposition shape in the kernel, reducing all associated dimensions. THen the
-    resulting kernel is executed.
-
-
-
-    The superposition_weights parameter must be filled when a superposition is defined.
-    Each element in first N dimensions of the weight must corrospond to an element
-    of the superposition_shape defined in the constructor. The weights can be dense
-    or sparse. Additionally, if the superposition_weights parameter is found to be longer than
-    N, the excess on the end are defined to be batch dimensions.
     """
+    Type = _Linear
     def __init__(self,
                  input_shape: Functions.StandardShapeType,
                  output_shape: Functions.StandardShapeType,
                  parallel: Optional[Functions.StandardShapeType] = None,
-                 dynamic: Optional[Functions.StandardShapeType] = None,
                  dtype: Optional[torch.dtype] = None,
                  device: Optional[torch.device] = None,
                  use_bias: bool = True,
                  ):
-        """
-
-        :param input_shape: What dynamic_shape, in either list or int format, to accept as inputs for linear
-        :param output_shape: What dynamic_shape, in either list or int format, to accept as inputs for linear
-        :param parallel: What dynamic_shape, in either list or int format, to setup as ensemble dimensions
-        :param dynamic: What dynamic_shape, in either list or int format, to setup as dynamic dimensions
-        :param dtype: The dtype. Defaults to float64
-        :param device: The device. Defaults to CPU
-        :param use_bias: Whether to use bias
-        """
 
         super().__init__()
 
@@ -426,42 +365,25 @@ class Linear(nn.Module):
 
         if parallel is not None:
             parallel = Functions.standardize_shape(parallel, 'parallel', task=task)
-        if dynamic is not None:
-            dynamic = Functions.standardize_shape(dynamic, 'dynamic', task=task)
-
 
         self.input_shape = input_shape
         self.output_shape = output_shape
         self.parallel = parallel
-        self.dynamic = dynamic
 
-        self.input_map = Core.Reshape_Layer(input_shape, input_shape.prod().unsqueeze(-1))
-        self.output_map = Core.Reshape_Layer(output_shape.prod().unsqueeze(-1), output_shape)
+        self.inputMapFactory = Core.ReshapeFactory(input_shape, input_shape.prod().unsqueeze(-1))
+        self.outputMapFactory = Core.ReshapeFactory(output_shape.prod().unsqueeze(-1), output_shape)
         self.expected_input_shape = input_shape
 
-        self.kernel = make_kernel(input_shape, output_shape, parallel, dynamic, device, dtype)
+        self.kernel = make_kernel(input_shape, output_shape, parallel, device, dtype)
         if use_bias:
-            self.bias = make_bias(output_shape, parallel, dynamic, device, dtype)
+            self.bias = make_bias(output_shape, parallel, device, dtype)
         else:
             self.bias = None
-
-    def forward(self,
-                tensor: torch.Tensor,
-                superposition_weights: Optional[torch.Tensor] = None
-                )->torch.Tensor:
-
-
+    def forward(self)->_Linear:
         # Create the kernels accounting for any superposition
-        weight_name = "superposition_weights"
-        matrix = self.kernel(superposition_weights, weight_name, "setting up superimposed matrix for linear forward")
-        if self.bias is not None:
-            bias = self.bias(superposition_weights, weight_name, "setting up superimposed bias for linear forward")
-        else:
-            bias = None
+        task = "executing linear forward reshape"
+        return _Linear(self.inputMapFactory(task),
+                       self.kernel,
+                       self.bias,
+                       self.outputMapFactory(task), )
 
-        # Run forward call
-        tensor = self.input_map(tensor, "reshaping tensor for linear forward")
-        tensor = linear_forward(tensor, matrix, bias, "Executing linear forward")
-        tensor = self.output_map(tensor, "reshaping tensor after linear forward")
-
-        return tensor
