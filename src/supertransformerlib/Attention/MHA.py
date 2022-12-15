@@ -111,20 +111,7 @@ class MultiHeadedAttentionFactory(nn.Module):
         self.collapseFactory = Basics.LinearFactory([heads, head_width], d_output, parallel=parallel)
 
 
-    def forward(self,
-                query: torch.Tensor,
-                key: torch.Tensor,
-                value: torch.Tensor,
-                mask: Optional[torch.Tensor] = None) -> _MultiHeadedAttention_Forward:
-        """
-
-
-        :param query: The query. Of dynamic_shape (...,(dynamic), (...parallel), items, embedding)
-        :param key: The key, Of dynamic_shape (..., (dynamic), (...parallel), content_items, embedding)
-        :param value: The value. Of dynamic_shape, (..., (dynamic), (...parallel), content_items, embedding)
-        :param mask: A bool mask. True masks. Optional. Of dynamic_shape (..., (ensemble), items, content_items)
-        :return: tensor. Attention result
-        """
+    def forward(self) -> _MultiHeadedAttention_Forward:
 
         return _MultiHeadedAttention_Forward(
             self.queryFactory(),

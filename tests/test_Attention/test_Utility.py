@@ -66,3 +66,4 @@ class test_CreateHead(unittest.TestCase):
         otherfactory = torch.jit.load(path)
 
         layer = otherfactory()
+        layer(test_tensor)

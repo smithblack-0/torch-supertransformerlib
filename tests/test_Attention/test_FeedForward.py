@@ -9,7 +9,7 @@ class test_Feedforward(unittest.TestCase):
     def test_straightforward(self):
         """Test feedforward works without any tricks"""
         test_tensor = torch.randn([10, 20, 4, 16])
-        factory = Attention.feedForwardFactory(16)
+        factory = Attention.FeedForwardFactory(16)
         factory = torch.jit.script(factory)
 
         layer = factory()
@@ -21,7 +21,7 @@ class test_Feedforward(unittest.TestCase):
         """ Test the parallel processing system is engaging"""
         test_tensor = torch.randn([10, 20, 4, 16])
 
-        factory = Attention.feedForwardFactory(16, parallel=[10, 20])
+        factory = Attention.FeedForwardFactory(16, parallel=[10, 20])
         factory = torch.jit.script(factory)
 
         layer = factory()

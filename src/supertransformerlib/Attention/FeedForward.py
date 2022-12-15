@@ -35,7 +35,7 @@ class _FeedForward:
 
 torch.jit.script(_FeedForward)
 
-class feedForwardFactory(nn.Module):
+class FeedForwardFactory(nn.Module):
     """
     A feedforward factory layer.
 

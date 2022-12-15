@@ -12,7 +12,8 @@ mechanism is sane
 import unittest
 import torch
 import src.supertransformerlib.Structures.Accumulators as Accumulators
-import src.supertransformerlib.Core as Core
+
+
 class test_Halting_Lattice(unittest.TestCase):
     """
     Test fixture for the halting
@@ -67,12 +68,14 @@ class test_Halting_Lattice(unittest.TestCase):
             tensor = torch.tensor([1, 1, 3])
             accum.clamp_probabilities(tensor)
         self.assertRaises(Accumulators.Accumulator_Exception, tester)
+
     def test_multidimensional_clamp(self):
         """Test clamping in multiple dimensions at once."""
         spec = Accumulators.latticeSpec([10, 20], [12, 5])
         accum = Accumulators.haltingLatticeAccumulator(spec)
         test_tensor = 2*torch.rand([10, 20, 12, 5])
         accum.clamp_probabilities(test_tensor)
+
     def test_unhalted_elementwork(self):
         """ Test that displays of unhalted elements and elements per batch work."""
         spec = Accumulators.latticeSpec(3, 2)
