@@ -1,11 +1,12 @@
-from typing import List, Optional
+"""
+A module for sparse tensor manipulation
+functions
+"""
+
+from typing import List
 import torch
-import itertools
-import src.supertransformerlib.Core.Errors as Errors
-import src.supertransformerlib.Core.StringUtil as StringUtil
-
-
-
+from src.supertransformerlib.Core import errors
+from src.supertransformerlib.Core import string_util
 def calculate_shape_strides(shape: List[int])->torch.Tensor:
     """
     Calculate and return the strides associated
@@ -137,8 +138,8 @@ def masked_matrix_multiplication(tensor_a: torch.Tensor,
                          and the mask had shape {mask.shape}. These do not broadcast
                          together at dimension {i}.
                          """
-                reason = StringUtil.dedent(reason)
-                raise Errors.ValidationError("MaskedMatmulError", reason)
+                reason = string_util.dedent(reason)
+                raise errors.ValidationError("MaskedMatmulError", reason)
         broadcast_shape.append(max_length)
 
     tensor_a = torch.broadcast_to(tensor_b, broadcast_shape)

@@ -11,10 +11,8 @@ a sparse index.
 """
 
 import torch
-from typing import Optional
 
-
-def random_sample_mask(tensor: torch.Tensor, probability: float, task: Optional[str] = None)->torch.Tensor:
+def random_sample_mask(tensor: torch.Tensor, probability: float)->torch.Tensor:
     """
     Accept a tensor. Return a boolean mask
     which samples each element with a random
@@ -28,7 +26,7 @@ def random_sample_mask(tensor: torch.Tensor, probability: float, task: Optional[
 
 
 
-def top_k_mask(tensor: torch.Tensor, num: int, task: Optional[str] = None)->torch.Tensor:
+def top_k_mask(tensor: torch.Tensor, num: int)->torch.Tensor:
     """
     Accepts a tensor. Returns a mask which samples the
     top-k elements along the last dimension. The mask
@@ -42,7 +40,9 @@ def top_k_mask(tensor: torch.Tensor, num: int, task: Optional[str] = None)->torc
 
     sorted_index = torch.argsort(tensor, dim=-1, descending=True)
     sorted_index = sorted_index[..., :num]
-    numerical_index_reference = torch.arange(tensor.shape[-1], device=tensor.device, dtype= torch.int64)
+    numerical_index_reference = torch.arange(tensor.shape[-1],
+                                             device=tensor.device,
+                                             dtype= torch.int64)
     mask = sorted_index.unsqueeze(-1) == numerical_index_reference
     mask = torch.any(mask, dim=-2)
     return mask
@@ -54,7 +54,8 @@ def top_p_mask(tensor: torch.Tensor, probability_threshold: float)->torch.Tensor
     top-p elements along the last dimension. Assumes the
     last dimension is a probability which adds up to one.
     """
-    # We perform top p. We do this by first sorting the values and their indices in descending order.
+    # We perform top p. We do this by first sorting the values and their indices in descending
+    #  order.
     # We also create an output buffer. Then, we perform insertion into an output buffer by
     # the index until we run out of valid entries to insert.
     with torch.no_grad():
@@ -74,5 +75,3 @@ def top_p_mask(tensor: torch.Tensor, probability_threshold: float)->torch.Tensor
             if torch.all(torch.logical_not(thresholdmask)):
                 break
         return mask
-
-

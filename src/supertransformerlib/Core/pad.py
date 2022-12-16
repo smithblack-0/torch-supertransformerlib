@@ -1,12 +1,22 @@
+"""
+A small module containing a custom
+padding function for circular padding.
+"""
+
+
 from typing import Optional, List
 
 import torch
 
-import src.supertransformerlib
-import src.supertransformerlib.Core.Errors as Errors
+from src.supertransformerlib import Core
+from src.supertransformerlib.Core import errors as Errors
 
 
 class PaddingException(Errors.ValidationError):
+    """
+    An exception to raise when something
+    goes wrong when padding
+    """
     def __init__(self,
                  reason: str,
                  task: Optional[str] = None,
@@ -69,7 +79,8 @@ def _pad_circular(tensor: torch.Tensor, paddings: List[int]):
     new_shapes: List[int] = torch.concat([static_shape, updated_shape]).tolist()
 
     current_strides = torch.tensor([buffer.stride(dim) for dim in range(buffer.dim())],
-                                   dtype=torch.int64)  # Workaround for bad typing on Tensor.stride. Torchscript wont
+                                   dtype=torch.int64)  # Workaround for bad typing on Tensor.stride.
+                                                       # Torchscript wont
                                                        # do tensor.stride()
     new_strides: List[int] = current_strides.tolist()
 
@@ -113,7 +124,7 @@ def pad_circular(tensor: torch.Tensor, paddings: List[int], task: Optional[str] 
         'padding' should be even. However, found
         length of {len(paddings)}
         """
-        reason = src.supertransformerlib.Core.StringUtil.dedent(reason)
+        reason = Core.dedent(reason)
         raise PaddingException(reason, task, paddings, tensor)
 
     if len(paddings) // 2 > tensor.dim():
@@ -123,7 +134,7 @@ def pad_circular(tensor: torch.Tensor, paddings: List[int], task: Optional[str] 
         of {len(paddings)//2}. The padding rank cannot be greater
         than the tensor rank.
         """
-        reason = src.supertransformerlib.Core.StringUtil.dedent(reason)
+        reason = Core.dedent(reason)
         raise PaddingException(reason, task, paddings, tensor)
 
     if torch.tensor(tensor.shape).prod() == 0:
@@ -134,7 +145,7 @@ def pad_circular(tensor: torch.Tensor, paddings: List[int], task: Optional[str] 
         
         This is not allowed when using circular padding. 
         """
-        reason = src.supertransformerlib.Core.StringUtil.dedent(reason)
+        reason = Core.dedent(reason)
         raise PaddingException(reason, task, paddings, tensor)
 
     if torch.any(torch.tensor(paddings) < 0):
@@ -146,7 +157,7 @@ def pad_circular(tensor: torch.Tensor, paddings: List[int], task: Optional[str] 
         
         Provided paddings were {paddings}
         """
-        reason = src.supertransformerlib.Core.StringUtil.dedent(reason)
+        reason = Core.dedent(reason)
         raise PaddingException(reason, task, paddings, tensor)
 
     return _pad_circular(tensor, paddings)
