@@ -1,14 +1,24 @@
-import itertools
-import unittest
+"""
+
+A simple test collection to test
+the functions subsection of Core.
+
+"""
+
+
+
 from typing import List
 
+import itertools
+import unittest
 import numpy as np
 import torch
+
+
 from torch.nn import functional as F
+from src.supertransformerlib import Core
 
-import src.supertransformerlib.Core as Core
-
-print_errors = True
+PRINT_ERRORS = True
 
 
 def example_circular_padding(tensor: torch.Tensor, paddings: List[int]):
@@ -27,16 +37,15 @@ def example_circular_padding(tensor: torch.Tensor, paddings: List[int]):
 
     interesting_length = ordered_pairings.shape[0]
     ordered_pairings = F.pad(ordered_pairings, (0, 0, tensor.dim() - interesting_length, 0))
-    numpy_pairings = [(start, end) for start, end in ordered_pairings]
 
     array = tensor.numpy()
-    array = np.pad(array, numpy_pairings, mode="wrap")
+    array = np.pad(array, ordered_pairings, mode="wrap")
     output = torch.from_numpy(array)
 
     return output
 
 
-class test_circular_padding(unittest.TestCase):
+class TestCirculuarPadding(unittest.TestCase):
     """
     Test that the circular padding mechanism is working correctly.
     """
@@ -51,6 +60,7 @@ class test_circular_padding(unittest.TestCase):
         self.assertTrue(torch.all(expected == got))
 
     def test_cases(self):
+        """ Test a variety of pad permutations"""
 
         tensor = torch.arange(1000).view(10, 10, 10)
         ndim = 2
@@ -58,60 +68,58 @@ class test_circular_padding(unittest.TestCase):
 
         options = itertools.product(*paddings)
         for option in options:
-            try:
-                expected = example_circular_padding(tensor, option)
-                got = Core.Pad.pad_circular(tensor, option)
-                self.assertTrue(torch.all(expected == got))
-            except Exception as err:
-                expected = example_circular_padding(tensor, option)
-                got = Core.Pad.pad_circular(tensor, option)
-                self.assertTrue(torch.all(expected == got))
+            expected = example_circular_padding(tensor, option)
+            got = Core.pad_circular(tensor, option)
+            self.assertTrue(torch.all(expected == got))
 
-
-class test_circular_padding_errors(unittest.TestCase):
+class TestCircularPaddingErrors(unittest.TestCase):
     """
     Test that the circular padding mechanism is making sane errors.
     """
-    def test_padding_too_long(self):
+    def test_padding_wrong_rank(self):
+        """ test that the padding throws on bad rank"""
         tensor = torch.randn([10])
         padding = [1, 1, 1, 1]
         try:
-            output = Core.Pad.pad_circular(tensor, padding)
+            Core.pad_circular(tensor, padding)
             raise RuntimeError("Did not throw")
         except Core.Pad.PaddingException as err:
-            if print_errors:
+            if PRINT_ERRORS:
                 print(err)
 
 
     def test_padding_not_symmetric(self):
+        """test we throw when we do not get padding before AND after"""
         tensor = torch.randn([10])
         padding = [1]
 
         try:
-            output = Core.Pad.pad_circular(tensor, padding)
+            Core.pad_circular(tensor, padding)
             raise RuntimeError("Did not throw")
         except Core.Pad.PaddingException as err:
-            if print_errors:
+            if PRINT_ERRORS:
                 print(err)
 
     def test_padding_negative(self):
+        """TEst we throw when a negative pad length is passed"""
         tensor = torch.randn([10])
         padding = [-1, 10]
 
         try:
-            output = Core.Pad.pad_circular(tensor, padding)
+            Core.Pad.pad_circular(tensor, padding)
             raise RuntimeError("Did not throw")
         except Core.Pad.PaddingException as err:
-            if print_errors:
+            if PRINT_ERRORS:
                 print(err)
 
     def test_tensor_dead_dim(self):
+        """ Test we throw when there is nothing to pad with"""
         tensor = torch.randn([1, 10, 0])
         padding = [1, 0]
 
         try:
-            output = Core.Pad.pad_circular(tensor, padding)
+            Core.Pad.pad_circular(tensor, padding)
             raise RuntimeError("Did not throw")
         except Core.Pad.PaddingException as err:
-            if print_errors:
+            if PRINT_ERRORS:
                 print(err)

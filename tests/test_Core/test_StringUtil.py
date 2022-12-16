@@ -4,9 +4,9 @@ Test feature for any string manipulation
 functions which I develop
 """
 
-import src.supertransformerlib.Core.StringUtil
 import unittest
 import textwrap
+from src.supertransformerlib import Core
 
 class test_functions(unittest.TestCase):
     def test_dedent(self):
@@ -23,7 +23,7 @@ class test_functions(unittest.TestCase):
         """
 
         expected = textwrap.dedent(message)
-        gotten = src.supertransformerlib.Core.StringUtil.dedent(message)
+        gotten = Core.dedent(message)
         equivalent = expected == gotten
         self.assertTrue(equivalent, "textwrap dedent and torchscript dedent did not match.")
 
@@ -39,7 +39,7 @@ class test_functions(unittest.TestCase):
             replace=replace,
             replace2=replace2
         )
-        received = src.supertransformerlib.Core.StringUtil.format(string_to_format,
+        received = Core.format(string_to_format,
                                                                   {
                                                                    "replace": replace,
                                                                    "replace2": replace2

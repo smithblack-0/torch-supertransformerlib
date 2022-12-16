@@ -1,8 +1,16 @@
+"""
+
+Test features for some
+of the top k and top n utilities
+
+"""
+
+
+
 import unittest
 import torch
 import itertools
-import src.supertransformerlib.Core.SampleUtils as SampleUtils
-
+from src.supertransformerlib import Core
 
 class test_top_K_Mask(unittest.TestCase):
     """
@@ -45,12 +53,12 @@ class test_top_K_Mask(unittest.TestCase):
 
             try:
                 expected = self.manually_calculate_top_k(tensor, num)
-                got = SampleUtils.top_k_mask(tensor, num)
+                got = Core.top_k_mask(tensor, num)
 
                 self.assertTrue(torch.all(expected == got))
             except Exception as err:
                 expected = self.manually_calculate_top_k(tensor, num)
-                got = SampleUtils.top_k_mask(tensor, num)
+                got = Core.top_k_mask(tensor, num)
 
                 self.assertTrue(torch.all(expected == got))
     def test_3d_cases(self):
@@ -71,12 +79,12 @@ class test_top_K_Mask(unittest.TestCase):
 
             try:
                 expected = self.manually_calculate_top_k(tensor, num)
-                got = SampleUtils.top_k_mask(tensor, num)
+                got = Core.top_k_mask(tensor, num)
                 self.assertTrue(torch.all(expected == got))
             except Exception as err:
                 print(dim0, dim1, dim2, num)
                 expected = self.manually_calculate_top_k(tensor, num)
-                got = SampleUtils.top_k_mask(tensor, num)
+                got = Core.top_k_mask(tensor, num)
                 self.assertTrue(torch.all(expected == got))
 
 
@@ -85,7 +93,9 @@ class test_top_P_Mask(unittest.TestCase):
     A test case for top p
     """
 
-    def manually_calculate_top_p(self, tensor: torch.Tensor, probability_threshold: float)->torch.Tensor:
+    def manually_calculate_top_p(self,
+                                 tensor: torch.Tensor,
+                                 probability_threshold: float)->torch.Tensor:
         """
         Manually calculates top p using clearly defined for loop logic
         Naturally, this is very slow and so not utilized in practice.
@@ -137,11 +147,11 @@ class test_top_P_Mask(unittest.TestCase):
 
             try:
                 expected = self.manually_calculate_top_p(tensor, probability_threshold)
-                got = SampleUtils.top_p_mask(tensor, probability_threshold)
+                got = Core.top_p_mask(tensor, probability_threshold)
                 self.assertTrue(torch.all(expected == got))
             except Exception as err:
                 expected = self.manually_calculate_top_p(tensor, probability_threshold)
-                got = SampleUtils.top_p_mask(tensor, probability_threshold)
+                got = Core.top_p_mask(tensor, probability_threshold)
                 self.assertTrue(torch.all(expected == got))
 
     def test_run_batched_cases(self):
@@ -158,10 +168,9 @@ class test_top_P_Mask(unittest.TestCase):
 
             try:
                 expected = self.manually_calculate_top_p(tensor, probability_threshold)
-                got = SampleUtils.top_p_mask(tensor, probability_threshold)
+                got = Core.top_p_mask(tensor, probability_threshold)
                 self.assertTrue(torch.all(expected == got))
             except Exception as err:
                 expected = self.manually_calculate_top_p(tensor, probability_threshold)
-                got = SampleUtils.top_p_mask(tensor, probability_threshold)
+                got = Core.top_p_mask(tensor, probability_threshold)
                 self.assertTrue(torch.all(expected == got))
-

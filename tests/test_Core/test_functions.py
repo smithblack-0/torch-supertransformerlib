@@ -1,13 +1,18 @@
+"""
+Test features for some of the simple
+functions in core
+
+"""
+
+
 import unittest
-
 import torch
+from src.supertransformerlib import Core
 
-import src.supertransformerlib
-import src.supertransformerlib.Core.Functions
-from src.supertransformerlib import Core as Core
-
-
-class test_functions(unittest.TestCase):
+class TestFunctions(unittest.TestCase):
+    """
+    The test suite for functions
+    """
     def test_standardize(self):
         """
         Test the ability of the standardize function to perform standardization.
@@ -23,7 +28,7 @@ class test_functions(unittest.TestCase):
                                 expected_result):
 
             #Standard
-            output = src.supertransformerlib.Core.Functions.standardize_shape(input,
+            output = Core.standardize_shape(input,
                                                                               name,
                                                                               allow_negatives,
                                                                               allow_zeros,
@@ -32,7 +37,7 @@ class test_functions(unittest.TestCase):
             self.assertTrue(torch.all(output == expected_result))
 
             #Torchscript
-            func = torch.jit.script(src.supertransformerlib.Core.Functions.standardize_shape)
+            func = torch.jit.script(Core.standardize_shape)
             output =func(input,
                                             name,
                                             allow_negatives,
@@ -48,8 +53,8 @@ class test_functions(unittest.TestCase):
                              task):
 
             try:
-                func = torch.jit.script(src.supertransformerlib.Core.Functions.standardize_shape)
-                output = func(input,
+                func = torch.jit.script(Core.standardize_shape)
+                func(input,
                               name,
                               allow_negatives,
                               allow_zeros,
@@ -64,7 +69,8 @@ class test_functions(unittest.TestCase):
 
         basic_int = (1, "basic", False, False, task, torch.tensor([1]))
         basic_list = ([1, 2], "list", False, False, task, torch.tensor([1, 2]))
-        basic_tensor = (torch.tensor([1, 2, 3]), "tensor", False, False, task, torch.tensor([1, 2, 3]))
+        basic_tensor = (torch.tensor([1, 2, 3]), "tensor", False, False, task,
+                        torch.tensor([1, 2, 3]))
         allow_negatives = (-1, "basic", True, True, task, torch.tensor([-1]))
         allow_zeros = (0, "zeros", False, True, task, torch.tensor([0]))
 
@@ -95,11 +101,11 @@ class test_functions(unittest.TestCase):
 
         def test_valid(tensor: torch.Tensor):
             #Standard
-            src.supertransformerlib.Core.Functions.validate_shape_tensor(tensor)
+            Core.validate_shape_tensor(tensor)
 
             #torchscript
 
-            func = torch.jit.script(src.supertransformerlib.Core.Functions.validate_shape_tensor)
+            func = torch.jit.script(Core.validate_shape_tensor)
             func(tensor)
 
 
@@ -107,17 +113,17 @@ class test_functions(unittest.TestCase):
 
             #Standard
             try:
-                src.supertransformerlib.Core.Functions.validate_shape_tensor(tensor)
-                self.assertTrue(False)
-            except ValueError as err:
+                Core.validate_shape_tensor(tensor)
+                raise RuntimeError("Did not throw")
+            except ValueError:
                 pass
             #Torchscript
 
-            func = torch.jit.script(src.supertransformerlib.Core.Functions.validate_shape_tensor)
+            func = torch.jit.script(Core.validate_shape_tensor)
             try:
                 func(tensor)
                 raise RuntimeError("Did not stop")
-            except torch.jit.Error as err:
+            except torch.jit.Error:
                 pass
 
         #Valid cases
@@ -145,22 +151,22 @@ class test_functions(unittest.TestCase):
         def test_succeed(string, stringname, options, optionsname):
 
             #Test standard
-            src.supertransformerlib.Core.Functions.validate_string_in_options(string, stringname, options, optionsname)
+            Core.validate_string_in_options(string, stringname, options, optionsname)
 
             #Test torchscript
-            func = torch.jit.script(src.supertransformerlib.Core.Functions.validate_string_in_options)
+            func = torch.jit.script(Core.validate_string_in_options)
             func(string, stringname, options, optionsname)
 
         def test_failure(string, stringname, options, optionsname):
             #Test standard
 
             try:
-                src.supertransformerlib.Core.Functions.validate_string_in_options(string, stringname, options, optionsname)
+                Core.validate_string_in_options(string, stringname, options, optionsname)
             except ValueError as err:
                 print(err)
 
             #Test torchscript
-            func = torch.jit.script(src.supertransformerlib.Core.Functions.validate_string_in_options)
+            func = torch.jit.script(Core.validate_string_in_options)
             try:
                 func(string, stringname, options, optionsname)
             except torch.jit.Error:
@@ -178,11 +184,3 @@ class test_functions(unittest.TestCase):
         test_succeed(*succeed)
         test_failure(*wrong_type)
         test_failure(*not_in)
-
-
-class testTopK(unittest.TestCase):
-    """
-    Test unit for the top-k method in core.
-
-
-    """

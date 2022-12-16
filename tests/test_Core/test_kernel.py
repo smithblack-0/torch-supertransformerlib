@@ -1,18 +1,24 @@
+"""
+A simple test collection to test the
+kernel subsection of core.
+"""
+
+
+
 import unittest
 
 import torch
 from torch.nn import init
-
-from src.supertransformerlib.Core import SparseUtils, Kernel
 from src.supertransformerlib import Core
 
-print_errors = True
+PRINT_ERRORS = True
 
 def print_the_error(error):
+    """ Prints a caught error """
     print("--- printing a caught error for message inspection. See following ---")
     print(error)
 
-class testKernelSuperposition(unittest.TestCase):
+class TestKernelSuperposition(unittest.TestCase):
     """
     Test that the kernel superposition
     function will work properly no matter
@@ -20,6 +26,7 @@ class testKernelSuperposition(unittest.TestCase):
     """
 
     def test_dense_superposition(self):
+        """Test that dense superpositions operate correctly"""
 
         kernel = torch.randn([10, 20, 30, 5, 4])
         dynamics = torch.randn([10, 20, 7, 8])
@@ -29,12 +36,12 @@ class testKernelSuperposition(unittest.TestCase):
 
         #Standard
 
-        output = Kernel.make_dense_superposition(dynamics, kernel, dynamic_shape, None)
+        output = Core.make_dense_superposition(dynamics, kernel, dynamic_shape, None)
         self.assertTrue(output.shape == expected_shape)
 
         #Torchscript
 
-        function = torch.jit.script(Kernel.make_dense_superposition)
+        function = torch.jit.script(Core.make_dense_superposition)
         output = function(dynamics, kernel, dynamic_shape, None)
         self.assertTrue(output.shape == expected_shape)
 
@@ -45,7 +52,7 @@ class testKernelSuperposition(unittest.TestCase):
         dynamic_shape = torch.tensor([10, 20])
 
         mask = torch.randn([10, 20]) > 0
-        indices = SparseUtils.gen_indices_from_mask(mask)
+        indices = Core.gen_indices_from_mask(mask)
         values = dynamics[..., mask].movedim(-1, 0)
         hybrid_shape = [10, 20, 7, 8]
         sparse_dynamics = torch.sparse_coo_tensor(indices, values, size=hybrid_shape).coalesce()
@@ -54,32 +61,32 @@ class testKernelSuperposition(unittest.TestCase):
 
         #Standard
 
-        output = Kernel.make_sparse_superposition(sparse_dynamics, kernel, dynamic_shape, None)
+        output = Core.make_sparse_superposition(sparse_dynamics, kernel, dynamic_shape, None)
         self.assertTrue(output.shape == expected_shape)
-        self.assertTrue(output.is_sparse == False)
+        self.assertTrue(output.is_sparse is False)
 
         output.sum().backward()
-        self.assertTrue(kernel.grad != None)
-        self.assertTrue(dynamics.grad != None)
+        self.assertTrue(kernel.grad is not None)
+        self.assertTrue(dynamics.grad is not None)
 
         #Torchscript
 
         mask = torch.randn([10, 20]) > 0
-        indices = SparseUtils.gen_indices_from_mask(mask)
+        indices = Core.gen_indices_from_mask(mask)
         values = dynamics[..., mask].movedim(-1, 0)
         hybrid_shape = [10, 20, 7, 8]
         sparse_dynamics = torch.sparse_coo_tensor(indices, values, size=hybrid_shape).coalesce()
 
-        func = torch.jit.script(Kernel.make_sparse_superposition)
+        func = torch.jit.script(Core.make_sparse_superposition)
         output = func(sparse_dynamics, kernel, dynamic_shape, None)
         self.assertTrue(output.shape == expected_shape)
-        self.assertTrue(output.is_sparse == False)
+        self.assertTrue(output.is_sparse is False)
 
         output.sum().backward()
-        self.assertTrue(kernel.grad != None)
-        self.assertTrue(dynamics.grad != None)
+        self.assertTrue(kernel.grad is not None)
+        self.assertTrue(dynamics.grad is not None)
 
-class test_Parameter(unittest.TestCase):
+class TestParameter(unittest.TestCase):
     """
     Test the actual parameter manager itself.
     """
@@ -88,7 +95,7 @@ class test_Parameter(unittest.TestCase):
         shape = [20, 30, 10]
         func = init.kaiming_uniform_
 
-        layer = Kernel.Parameter(func, shape)
+        layer = Core.Parameter(func, shape)
         layer = torch.jit.script(layer)
         output = layer()
         self.assertTrue(torch.Size(shape) == output.shape)
@@ -102,7 +109,7 @@ class test_Parameter(unittest.TestCase):
 
 
         expected_shape = torch.Size([20, 30, 10])
-        layer = Kernel.Parameter(func, shape, superposition)
+        layer = Core.Parameter(func, shape, superposition)
         layer = torch.jit.script(layer)
         output = layer(weights)
         self.assertTrue(expected_shape == output.shape)
@@ -116,7 +123,7 @@ class test_Parameter(unittest.TestCase):
 
 
         expected_shape = torch.Size([5, 20, 30, 10])
-        layer = Kernel.Parameter(func, shape, superposition)
+        layer = Core.Parameter(func, shape, superposition)
         layer = torch.jit.script(layer)
         output = layer(weights)
         self.assertTrue(expected_shape == output.shape)
@@ -134,7 +141,7 @@ class test_Parameter(unittest.TestCase):
 
 
         expected_shape = torch.Size([20, 30, 10])
-        layer = Kernel.Parameter(func, shape, superposition)
+        layer = Core.Parameter(func, shape, superposition)
         layer = torch.jit.script(layer)
         output = layer(weights)
         self.assertTrue(output.shape == expected_shape)
@@ -150,7 +157,7 @@ class test_Parameter(unittest.TestCase):
         weights = Core.SparseUtils.convert_dense_to_hybrid(weights, mask)
 
         expected_shape = torch.Size([7, 20, 30, 10])
-        layer = Kernel.Parameter(func, shape, superposition)
+        layer = Core.Parameter(func, shape, superposition)
         layer = torch.jit.script(layer)
         output = layer(weights)
         self.assertTrue(output.shape == expected_shape)
@@ -164,46 +171,49 @@ class test_Parameter(unittest.TestCase):
         dtype = torch.float64
 
         expected_shape = torch.Size([20, 30, 10])
-        layer = Kernel.Parameter(func, shape, superposition, dtype=dtype)
+        layer = Core.Parameter(func, shape, superposition, dtype=dtype)
         layer = torch.jit.script(layer)
         output = layer(weights.to(dtype=dtype))
         self.assertTrue(expected_shape == output.shape)
         self.assertTrue(output.dtype == dtype)
 
 
-class test_Call_Errors(unittest.TestCase):
+class TestCallErrors(unittest.TestCase):
     """
     Tests errors are being thrown when appropriate
     """
     def test_not_called_with_weights_when_needed(self):
+        """Error test: Not called with weights"""
         shape = [20, 30, 10]
         superposition = [10, 10]
         func = init.kaiming_uniform_
 
         try:
-            layer = Kernel.Parameter(func, shape, superposition)
-            param = layer()
+            layer = Core.Parameter(func, shape, superposition)
+            layer()
             raise RuntimeError("Did not throw when required")
-        except Kernel.KernelSetupError as err:
-            if print_errors:
+        except Core.KernelSetupError as err:
+            if PRINT_ERRORS:
                 print_the_error(err)
 
 
     def test_called_with_weights_when_not_needed(self):
+        """ Error test: Called with weights"""
 
         shape = [20, 30, 10]
         weights = torch.rand([10, 10])
         func = init.kaiming_uniform_
 
         try:
-            layer = Kernel.Parameter(func, shape)
-            parameter = layer(weights)
+            layer = Core.Parameter(func, shape)
+            layer(weights)
             raise RuntimeError("Did not throw when expected")
-        except Kernel.KernelSetupError as err:
-            if print_errors:
+        except Core.KernelSetupError as err:
+            if PRINT_ERRORS:
                 print_the_error(err)
 
     def test_weights_wrong_shape(self):
+        """ Error test: weights wrong shape"""
 
         shape = [20, 30, 10]
         superposition = [10, 10]
@@ -211,11 +221,11 @@ class test_Call_Errors(unittest.TestCase):
         func = torch.nn.init.kaiming_uniform_
 
         try:
-            layer = Kernel.Parameter(func, shape, superposition)
-            output = layer(weights)
+            layer = Core.Parameter(func, shape, superposition)
+            layer(weights)
             raise RuntimeError("Did not throw when expected")
-        except Kernel.KernelSetupError as err:
-            if print_errors:
+        except Core.KernelSetupError as err:
+            if PRINT_ERRORS:
                 print_the_error(err)
 
     def test_weights_almost_correct(self):
@@ -226,15 +236,16 @@ class test_Call_Errors(unittest.TestCase):
         func = torch.nn.init.kaiming_uniform_
 
         try:
-            layer = Kernel.Parameter(func, shape, superposition)
-            output = layer(weights)
+            layer = Core.Parameter(func, shape, superposition)
+            layer(weights)
             raise RuntimeError("Did not throw when expected")
-        except Kernel.KernelSetupError as err:
-            if print_errors:
+        except Core.KernelSetupError as err:
+            if PRINT_ERRORS:
                 print_the_error(err)
 
 
     def test_weights_bad_dtype(self):
+        """Error test: Bad dtype"""
 
         shape = [20, 30, 10]
         superposition = [10, 10]
@@ -242,9 +253,9 @@ class test_Call_Errors(unittest.TestCase):
         func = torch.nn.init.kaiming_uniform_
 
         try:
-            layer = Kernel.Parameter(func, shape, superposition)
-            output = layer(weights)
+            layer = Core.Parameter(func, shape, superposition)
+            layer(weights)
             raise RuntimeError("Did not throw when expected")
-        except Kernel.KernelSetupError as err:
-            if print_errors:
+        except Core.KernelSetupError as err:
+            if PRINT_ERRORS:
                 print_the_error(err)
