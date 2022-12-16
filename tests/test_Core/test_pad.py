@@ -83,7 +83,7 @@ class TestCircularPaddingErrors(unittest.TestCase):
         try:
             Core.pad_circular(tensor, padding)
             raise RuntimeError("Did not throw")
-        except Core.Pad.PaddingException as err:
+        except Core.PaddingException as err:
             if PRINT_ERRORS:
                 print(err)
 
@@ -96,7 +96,7 @@ class TestCircularPaddingErrors(unittest.TestCase):
         try:
             Core.pad_circular(tensor, padding)
             raise RuntimeError("Did not throw")
-        except Core.Pad.PaddingException as err:
+        except Core.PaddingException as err:
             if PRINT_ERRORS:
                 print(err)
 
@@ -106,9 +106,9 @@ class TestCircularPaddingErrors(unittest.TestCase):
         padding = [-1, 10]
 
         try:
-            Core.Pad.pad_circular(tensor, padding)
+            Core.pad_circular(tensor, padding)
             raise RuntimeError("Did not throw")
-        except Core.Pad.PaddingException as err:
+        except Core.PaddingException as err:
             if PRINT_ERRORS:
                 print(err)
 
@@ -118,8 +118,8 @@ class TestCircularPaddingErrors(unittest.TestCase):
         padding = [1, 0]
 
         try:
-            Core.Pad.pad_circular(tensor, padding)
+            Core.pad_circular(tensor, padding)
             raise RuntimeError("Did not throw")
-        except Core.Pad.PaddingException as err:
+        except Core.PaddingException as err:
             if PRINT_ERRORS:
                 print(err)

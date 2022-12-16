@@ -3,7 +3,7 @@ import unittest
 import torch
 from torch import nn
 from src.supertransformerlib.Basics import Linear
-from src.supertransformerlib.Core import SparseUtils
+from src.supertransformerlib.Core import sparse_utils
 from src.supertransformerlib import Core
 from src.supertransformerlib.Core import Reshape
 print_errors = True
