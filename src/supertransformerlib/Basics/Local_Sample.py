@@ -518,3 +518,117 @@ def local_sample(
         """
         reason = Core.dedent(reason)
         raise LocalError(reason, task)
+
+
+class Local:
+    """
+    A virtual layer implimenting a given local operation.
+
+    It may be initialized with the desired local quantities,
+    and will then repeatively call the local sample
+    operation with those specifications.
+    """
+    def __init__(self,
+                 start: torch.Tensor,
+                 end: torch.Tensor,
+                 stride: torch.Tensor,
+                 dilation: torch.Tensor,
+                 offset: torch.Tensor,
+                 mode: str
+                 ):
+        self.start = start
+        self.end = end
+        self.stride = stride
+        self.dilation = dilation
+        self.offset = offset
+        self.mode = mode
+    def __call__(self, tensor: torch.Tensor)->torch.Tensor:
+        return local_sample(tensor,
+                            self.start,
+                            self.end,
+                            self.stride,
+                            self.dilation,
+                            self.offset,
+                            self.mode
+                            )
+
+
+class LocalFactory(nn.Module):
+    """
+    The factory layer for the local sample operation
+
+    Generates local layers to perform a particular sampling
+    pattern. See Basics.Local_Sample.local_sample for more
+    on what each parameter does. This layer will build
+    a virtual layer calling local sample with the
+    specified parameters.
+    """
+    Type = Local
+    def __init__(self,
+                 start: Core.StandardShapeType,
+                 end: Core.StandardShapeType,
+                 stride: Core.StandardShapeType,
+                 dilation: Core.StandardShapeType,
+                 offset: Core.StandardShapeType,
+                 mode: str = "pad",
+                 ):
+        """
+        :param start: The number of prior elements to include, along each dimension
+        :param end: The number of post elements to include, along each dimension
+        :param stride: The stride of the problem, along each dimension
+        :param dilation: The dilation of the problem, along each dimension
+        :param offset: The offset of the problem, along each dimension
+        :param mode: One of 'native', 'pad', or 'replicate'.
+        * Native mode only figures out what local kernels can be completely made using the available tensor materials
+        and returns those
+        * pad mode ensures the primary tensor dimensions remain the same shape, and pads the missing elements with zero
+        * replicate mode creates a infinitely scrolling grid where elements are replicated in sequence to fill in any
+        missing padding zones.
+        """
+        super().__init__()
+
+
+        # Basic validation
+
+        start = Core.standardize_shape(start, "start", allow_zeros=True, allow_negatives=True)
+        end = Core.standardize_shape(end, "end", allow_zeros=True, allow_negatives=True)
+        stride = Core.standardize_shape(stride, "stride", allow_zeros=False, allow_negatives=False)
+        dilation = Core.standardize_shape(dilation, "dilation", allow_zeros=False, allow_negatives=False)
+        offset = Core.standardize_shape(offset, "offset", allow_zeros=True, allow_negatives=True)
+
+        valid_modes = ["native", "pad", "replicate"]
+        Core.validate_string_in_options(mode, "mode", valid_modes, "padding mode")
+
+        # Broadcast, eg, stride = 1 across all dimensions.
+
+        target = max(start.shape[0],
+                     end.shape[0],
+                     stride.shape[0],
+                     dilation.shape[0],
+                     offset.shape[0]
+        )
+        start = torch.broadcast_to(start, [target])
+        end = torch.broadcast_to(end, [target])
+        stride = torch.broadcast_to(stride, [target])
+        dilation = torch.broadcast_to(dilation, [target])
+        offset = torch.broadcast_to(offset, [target])
+
+
+
+
+
+        self.start = start
+        self.end = end
+        self.stride = stride
+        self.dilation = dilation
+        self.offset = offset
+        self.mode = mode
+
+    def forward(self)->Local:
+        return Local(self.start,
+                     self.end,
+                     self.stride,
+                     self.dilation,
+                     self.offset,
+                     self.mode)
+

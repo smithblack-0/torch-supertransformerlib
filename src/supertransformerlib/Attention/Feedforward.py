@@ -7,8 +7,6 @@ from typing import Optional, Union, List
 
 import torch
 from torch import nn
-
-import src.supertransformerlib
 from src.supertransformerlib import Basics
 
 class _FeedForward:

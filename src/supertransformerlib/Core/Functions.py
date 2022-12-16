@@ -157,4 +157,3 @@ def get_shape(tensor: torch.Tensor)->torch.Tensor:
     shape = tensor.shape
     output = torch.tensor(shape, dtype=torch.int64, device=tensor.device)
     return output
-

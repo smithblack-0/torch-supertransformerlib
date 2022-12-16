@@ -145,3 +145,10 @@ class test_sparse_reshape(unittest.TestCase):
 
         reshaped_tensor = Reshape.reshape(sparse_tensor, initial_shape, final_shape)
         print(reshaped_tensor.shape)
+
+class test_reshape_layer(unittest.TestCase):
+    """
+    Test that the reshape layer is functioning correctly.
+    """
+    def test_reshape_functions(self):
+

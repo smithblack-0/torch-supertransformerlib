@@ -1,4 +1,4 @@
-from .FeedForward import *
+from .Feedforward import *
 from .Throwahead import *
 from .PIA import *
-from .MHA import *
+from .multiheaded_attention import *

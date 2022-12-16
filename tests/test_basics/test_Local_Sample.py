@@ -731,16 +731,29 @@ class test_circular_local_kernel(unittest.TestCase):
                 self.assertTrue(torch.all(expected == got))
 
 
-class test_native_errors(unittest.TestCase):
+class test_LayerFactory(unittest.TestCase):
     """
-    Test that native convolution throws appropriate
-    errors when called.
+    Test the factory makes sane local operations
     """
-    def test_tensor_rank_insufficient(self):
-        pass
-    def test_tensor_dim_not_large_enough_simple(self):
-        pass
-    def test_tensor_dim_not_large_enough_dilated(self):
-        pass
-    def test_tensor_dim_not_large_enough_2d(self):
-        pass
+    def test_factory(self):
+
+        test_tensor = torch.rand([10, 23, 52])
+        start_nodes = [-2, -3]
+        end_nodes = [2, 3]
+        stride = 1
+        dilation = [1, 1]
+        offset = 0
+        mode = "pad"
+
+        factory = Local_Sample.LocalFactory(start_nodes,
+                                            end_nodes,
+                                            stride,
+                                            dilation,
+                                            offset,
+                                            mode
+                                            )
+
+        instance = factory()
+        output = instance(test_tensor)
+        self.assertTrue(output.shape == torch.Size([10, 23, 52, 5, 7]))
+

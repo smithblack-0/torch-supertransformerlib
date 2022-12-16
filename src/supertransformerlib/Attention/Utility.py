@@ -4,7 +4,6 @@ import torch
 from torch import nn
 from src.supertransformerlib import Basics, Core
 
-@torch.jit.script
 def dot_product_attention(
         query: torch.Tensor,
         key: torch.Tensor,
@@ -29,7 +28,6 @@ def dot_product_attention(
     attn = attn / torch.sqrt(torch.tensor([query.shape[-1]], device=logits.device))
     return attn
 
-@torch.jit.script
 class _MakeHead:
     """
     A helper virtual layer.
@@ -49,6 +47,7 @@ class _MakeHead:
         correctly_ordered_headed= headed.movedim(-2, -3)
         return correctly_ordered_headed
 
+torch.jit.script(_MakeHead)
 
 class MakeHeadFactory(nn.Module):
     """
@@ -71,7 +70,6 @@ class MakeHeadFactory(nn.Module):
         output = _MakeHead(self.linear())
         return output
 
-@torch.jit.script
 class RemoveHeads:
     """
     A helper virtual layer.
@@ -90,8 +88,13 @@ class RemoveHeads:
         deheaded_results = self.flattenProjector(reordered_results)
         return deheaded_results
 
-
+torch.jit.script(RemoveHeads)
 class RemoveHeadsFactory(nn.Module):
+    """
+    A small factory class which generates
+    a virtual layer for removing heads.
+    """
+    Type = RemoveHeads
 
     def __init__(self,
                  d_model: int,
@@ -106,5 +109,5 @@ class RemoveHeadsFactory(nn.Module):
 
         self.linear = Basics.LinearFactory([heads, d_head], d_model,
                                            parallel, dtype, device)
-    def __call__(self)->RemoveHeads:
+    def forward(self)->RemoveHeads:
         return RemoveHeads(self.linear())
