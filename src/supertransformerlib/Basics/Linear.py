@@ -13,7 +13,7 @@ three distinct steps. These are
 """
 from typing import Optional, List
 import torch
-import src.supertransformerlib.Core.Errors as Errors
+import src.supertransformerlib.Core.errors as Errors
 import src.supertransformerlib.Core.Functions as Functions
 from src.supertransformerlib import Core
 from torch import nn

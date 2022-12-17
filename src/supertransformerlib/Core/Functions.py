@@ -1,8 +1,8 @@
 from typing import Union, List, Optional
 
 import torch
-import src.supertransformerlib.Core.StringUtil as StringUtil
-import src.supertransformerlib.Core.Errors as Errors
+import src.supertransformerlib.Core.string_util as StringUtil
+import src.supertransformerlib.Core.errors as Errors
 
 StandardShapeType = Union[torch.Tensor, List[int], int]
 def standardize_shape(input: StandardShapeType,

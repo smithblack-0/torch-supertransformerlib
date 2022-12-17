@@ -12,9 +12,9 @@ from torch import nn
 from torch.nn import functional as F
 
 import src.supertransformerlib.Core as Core
-import src.supertransformerlib.Core.Errors
+import src.supertransformerlib.Core.errors
 import src.supertransformerlib.Core.Functions
-import src.supertransformerlib.Core.StringUtil
+import src.supertransformerlib.Core.string_util
 from typing import Tuple, List, Optional
 
 
