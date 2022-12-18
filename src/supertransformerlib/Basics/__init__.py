@@ -1,1 +1,1 @@
-from .Linear import *
+from .linear import *

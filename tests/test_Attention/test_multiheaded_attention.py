@@ -25,10 +25,8 @@ class TestMultiHeadedAttention(unittest.TestCase):
         key = torch.randn(batch_shape + [10, 32])
         value = torch.randn(batch_shape + [10, 32])
 
-
-        factory = Attention.MultiHeadedAttentionFactory(32, heads)
-        factory = torch.jit.script(factory)
-        layer = factory()
+        layer = Attention.MultiHeadedAttention.make(32, heads)
+        layer = torch.jit.script(layer)
 
         attn = layer(query, key, value)
         self.assertTrue(attn.shape == torch.Size(batch_shape + [10, 32]))
@@ -42,14 +40,13 @@ class TestMultiHeadedAttention(unittest.TestCase):
         key = torch.randn(batch_shape + [30, 128])
         value = torch.randn(batch_shape + [30, 52])
 
-        factory = Attention.MultiHeadedAttentionFactory(d_model = 64,
+        layer = Attention.MultiHeadedAttention.make(d_model = 64,
                                                         d_key = 128,
                                                         d_value = 52,
                                                         heads = heads,
                                                         d_output = d_output)
-        factory = torch.jit.script(factory)
+        layer = torch.jit.script(layer)
 
-        layer = factory()
         attn = layer(query, key, value)
         self.assertTrue(attn.shape == torch.Size(batch_shape + [10, d_output]))
 
@@ -61,14 +58,14 @@ class TestMultiHeadedAttention(unittest.TestCase):
         content = torch.randn(batch_shape + [30, 16])
         mask = torch.randn(batch_shape + [10, 30]) > 0.5
 
-        factory = Attention.MultiHeadedAttentionFactory(64, 4,
-                                                        16, 16, 32)
-        factory = torch.jit.script(factory)
 
-        layer = factory()
+        layer = Attention.MultiHeadedAttention.make(64, 4,
+                                                    16, 16, 32)
+        layer = torch.jit.script(layer)
+
         attn = layer(query, content, content, mask)
 
-        self.assertTrue(attn.shape ==  torch.Size([3, 5, 10, 32]))
+        self.assertTrue(attn.shape == torch.Size([3, 5, 10, 32]))
 
     def test_parallel_capable(self):
         """ Tests whether the class functions correctly when provided an ensemble"""
@@ -77,13 +74,11 @@ class TestMultiHeadedAttention(unittest.TestCase):
         content = torch.randn([3, 5, 30, 16])
         mask = torch.randn([10, 30]) > 0.5
 
-        factory = Attention.MultiHeadedAttentionFactory(64, heads,)
+        layer = Attention.MultiHeadedAttention.make(64, heads, 16, 16, 32, parallel=[3,5])
+        layer = torch.jit.script(layer)
 
-        layer = Attention.MultiHeadedAttention(64, 16, 32, 4, [3,5])
         attn = layer(query, content, content, mask)
-        self.assertTrue(shape_equal([3, 5, 10, 32], attn.shape))
-
-
+        self.assertTrue(attn.shape == torch.Size([3, 5, 10, 32]))
 
     @unittest.skipUnless(torch.cuda.is_available(), "Gpu not availble")
     def test_mha_cuda(self):

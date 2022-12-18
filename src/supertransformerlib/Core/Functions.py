@@ -1,10 +1,17 @@
+"""
+A module containing a variety of simple functions
+"""
+
+
 from typing import Union, List, Optional
 
 import torch
-import src.supertransformerlib.Core.StringUtil as StringUtil
-import src.supertransformerlib.Core.Errors as Errors
+import src.supertransformerlib.Core.string_util as StringUtil
+import src.supertransformerlib.Core.errors as Errors
 
 StandardShapeType = Union[torch.Tensor, List[int], int]
+
+
 def standardize_shape(input: StandardShapeType,
                       input_name: str,
                       allow_negatives: bool = False,
@@ -19,7 +26,8 @@ def standardize_shape(input: StandardShapeType,
 
 
     :param input: One of the possible input formats
-    :param input_name: The name of the thing being standardized. Used to generate helpful error messages
+    :param input_name: The name of the thing being standardized.
+           Used to generate helpful error messages
     :param allow_negatives: Whether negative elements are allowed in the tensor dynamic_shape
     :param allow_zeros: Whether zero elements are allowed in the tensor dynamic_shape
     :param task: The task trace, used to make nice error messages.
@@ -82,13 +90,14 @@ def standardize_shape(input: StandardShapeType,
 
     return output
 
+
 torch.jit.script(standardize_shape)
 
 
 def validate_shape_tensor(shape_tensor: torch.Tensor):
     """
     Validates that a given tensor represents a valid dynamic_shape
-    :param input: The dynamic_shape tensor
+    :param shape_tensor: The dynamic_shape tensor
     :raises: ValueError, if the dynamic_shape tensor is invalid
     """
     if not isinstance(shape_tensor, torch.Tensor):
@@ -136,7 +145,9 @@ def get_shape_as_list(shape: torch.Tensor)->List[int]:
     output: List[int] = shape.tolist()
     return output
 
+
 torch.jit.script(get_shape_as_list)
+
 
 def get_strides(tensor: torch.Tensor)->torch.Tensor:
     """
