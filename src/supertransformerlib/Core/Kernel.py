@@ -11,10 +11,10 @@ from typing import Callable, Optional
 import torch
 from torch import nn
 
-import src.supertransformerlib.Core.Errors as Errors
+import src.supertransformerlib.Core.errors as Errors
 import src.supertransformerlib.Core.Functions as Functions
-import src.supertransformerlib.Core.Reshape as Reshape
-import src.supertransformerlib.Core.StringUtil as StringUtil
+import src.supertransformerlib.Core.reshape_module as Reshape
+import src.supertransformerlib.Core.string_util as StringUtil
 
 
 class KernelSetupError(Errors.ValidationError):

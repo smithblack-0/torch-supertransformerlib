@@ -154,7 +154,7 @@ class TestParameter(unittest.TestCase):
 
         weights = torch.rand([10, 5, 7])
         mask = torch.rand([10, 5]) > 0.5
-        weights = Core.SparseUtils.convert_dense_to_hybrid(weights, mask)
+        weights = Core.convert_dense_to_hybrid(weights, mask)
 
         expected_shape = torch.Size([7, 20, 30, 10])
         layer = Core.Parameter(func, shape, superposition)

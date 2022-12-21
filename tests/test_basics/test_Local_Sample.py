@@ -9,7 +9,7 @@ import torch
 import random
 from torch.nn import functional as F
 import itertools
-from src.supertransformerlib.Basics import Local_Sample
+from src.supertransformerlib.Basics import local_sample
 from src.supertransformerlib import Core
 from typing import List, Tuple
 

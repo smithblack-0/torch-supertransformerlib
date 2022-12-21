@@ -2,10 +2,10 @@ import unittest
 
 import torch
 from torch import nn
-from src.supertransformerlib.Basics import Linear
+from src.supertransformerlib.Basics import linear
 from src.supertransformerlib.Core import sparse_utils
 from src.supertransformerlib import Core
-from src.supertransformerlib.Core import Reshape
+from src.supertransformerlib.Core import reshape_module
 print_errors = True
 
 class testForwardWithBias(unittest.TestCase):

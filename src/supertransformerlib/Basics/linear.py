@@ -1,5 +1,4 @@
 """
-
 Definitions for the version of linear used
 throughout the library.
 
@@ -9,11 +8,10 @@ three distinct steps. These are
 * Defining the factory layer
 * Getting a Closure for the layer
 * Executing the Closure with whatever is so desired.
-
 """
 from typing import Optional, List
 import torch
-import src.supertransformerlib.Core.Errors as Errors
+import src.supertransformerlib.Core.errors as Errors
 import src.supertransformerlib.Core.Functions as Functions
 from src.supertransformerlib import Core
 from torch import nn

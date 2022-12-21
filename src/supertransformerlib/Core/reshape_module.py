@@ -9,10 +9,10 @@ from typing import Optional, List
 import torch
 from torch import nn
 
-import src.supertransformerlib.Core.Errors as Errors
+import src.supertransformerlib.Core.errors as Errors
 import src.supertransformerlib.Core.Functions as Functions
-import src.supertransformerlib.Core.StringUtil as StringUtil
-import src.supertransformerlib.Core.SparseUtils as SparseUtil
+import src.supertransformerlib.Core.string_util as StringUtil
+import src.supertransformerlib.Core.sparse_utils as SparseUtil
 
 class ReshapeException(Errors.ValidationError):
     """
@@ -269,6 +269,7 @@ class ReshapeFactory(nn.Module):
 
     It also saves and loads nicely.
     """
+    VirtualType = ReshapeClosure
     def __init__(self,
                  initial_shape: Functions.StandardShapeType,
                  final_shape: Functions.StandardShapeType):

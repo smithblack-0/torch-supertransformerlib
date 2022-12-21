@@ -1,6 +1,6 @@
 """
 
-Parameter Injection Attention
+Parameter block attention
 
 Allows for large blocks of parameters to be elegantly inserted into a
 model
@@ -17,7 +17,7 @@ class ParameterInjectionException(Core.ValidationError):
         super().__init__("ParameterInjectionException", reason)
 
 
-class _ParameterInjectionAttention:
+class _ParameterBlockAttention:
     """
     The primary virtual layer. The implimentation
     for the parameter injection attention mechanism.
@@ -28,11 +28,11 @@ class _ParameterInjectionAttention:
     def __init__(self,
                  static_keys: torch.Tensor,
                  static_values: torch.Tensor,
-                 QueryHeader: Utility.MakeHeadFactory.Type,
-                 Deheader: Utility.RemoveHeads,
+                 make_query_head: Utility.MakeHeadFactory.Type,
+                 merge_heads: Utility.RemoveHeads,
                  ):
-        self.make_query_head = QueryHeader
-        self.remove_heads = Deheader
+        self.make_query_head = make_query_head
+        self.merge_heads = merge_heads
         self.keys = static_keys
         self.values = static_values
 
@@ -42,10 +42,10 @@ class _ParameterInjectionAttention:
         attn = Utility.dot_product_attention(headed_query,
                                              self.keys,
                                              self.values)
-        output = self.remove_heads(attn)
+        output = self.merge_heads(attn)
         return output
 
-class ParameterInjectionAttentionFactory(nn.Module):
+class ParameterBlockAttentionFactory(nn.Module):
     """
     The factory class for this process.
 
@@ -61,7 +61,7 @@ class ParameterInjectionAttentionFactory(nn.Module):
     def __init__(self,
                  d_model: int,
                  heads: int,
-                 bank_size: int,
+                 block_size: int,
                  parallel: Core.StandardShapeType,
                  dtype: Optional[torch.dtype] = None,
                  device: Optional[torch.device] = None,
@@ -89,29 +89,29 @@ class ParameterInjectionAttentionFactory(nn.Module):
         # and values needed to perform attention with the headed
         # query.
 
-        keys = torch.empty([heads, bank_size, d_head], dtype=dtype, device=device)
+        keys = torch.empty([heads, block_size, d_head], dtype=dtype, device=device)
         torch.nn.init.kaiming_uniform_(keys)
 
-        values = torch.empty([heads, bank_size, d_head], dtype=dtype, device=device)
+        values = torch.empty([heads, block_size, d_head], dtype=dtype, device=device)
         torch.nn.init.kaiming_uniform_(values)
 
         # Store away everything
 
-        self.queryHeaderFactory = Utility.MakeHeadFactory(d_model, heads, d_head,
+        self.make_query_head_factory = Utility.MakeHeadFactory(d_model, heads, d_head,
                                                    parallel, dtype, device)
-        self.deHeaderFactory = Utility.RemoveHeadsFactory(d_model, heads, d_head,
+        self.merge_heads_factory = Utility.RemoveHeadsFactory(d_model, heads, d_head,
                                                           parallel, dtype, device)
         self.keys = keys
         self.values = values
 
-    def forward(self)->_ParameterInjectionAttention:
-        queryHeader = self.queryHeaderFactory()
-        deheader = self.deHeaderFactory()
+    def forward(self)->_ParameterBlockAttention:
+        make_query_head = self.make_query_head_factory()
+        merge_heads = self.merge_heads_factory()
 
-        return _ParameterInjectionAttention(self.keys,
-                                            self.values,
-                                            queryHeader,
-                                            deheader)
+        return _ParameterBlockAttention(self.keys,
+                                        self.values,
+                                        make_query_head,
+                                        merge_heads)
 
 
 

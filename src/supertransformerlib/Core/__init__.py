@@ -1,7 +1,8 @@
-from .StringUtil import *
-from .SparseUtils import *
-from . Pad import *
+from .string_util import *
+from .sparse_utils import *
+from .sample_utils import *
+from . pad import *
 from . Functions import *
-from . Errors import *
+from . errors import *
 from . Kernel import *
-from . Reshape import *
+from . reshape_module import *
