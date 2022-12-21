@@ -28,33 +28,12 @@ def dot_product_attention(
     attn = attn / torch.sqrt(torch.tensor([query.shape[-1]], device=logits.device))
     return attn
 
-class _MakeHead:
+class MakeHead(nn.Module):
     """
-    A helper virtual layer.
-
-    It makes the attention heads and
-    ensures the resulting tensors
-    are in (..., head, item, embedding)
-    format.
+    A helper layer. This will go
+    and make a head usable for an
+    attention mechanism.
     """
-    def __init__(self,
-                 Projector: Basics.LinearFactory.Type
-                 ):
-        self.Projector = Projector
-
-    def __call__(self, tensor: torch.Tensor) -> torch.Tensor:
-        headed = self.Projector(tensor)
-        correctly_ordered_headed= headed.movedim(-2, -3)
-        return correctly_ordered_headed
-
-torch.jit.script(_MakeHead)
-
-class MakeHeadFactory(nn.Module):
-    """
-    A factory layer designed for
-    making the make head virtual layers.
-    """
-    Type = _MakeHead
     def __init__(self,
                  d_model: int,
                  heads: int,
@@ -64,38 +43,24 @@ class MakeHeadFactory(nn.Module):
                  device: Optional[torch.device] = None,
                  ):
         super().__init__()
-        self.linear = Basics.LinearFactory(d_model, [heads, d_head], parallel,
-                                           dtype, device)
-    def forward(self)->_MakeHead:
-        output = _MakeHead(self.linear())
-        return output
 
-class RemoveHeads:
+        self.project_tensor_into_headspace = Basics.Linear(d_model,
+                                                       [heads, d_head],
+                                                       parallel,
+                                                       dtype, device)
+    def forward(self, tensor: torch.Tensor)->torch.Tensor:
+        """ Move items out of the way, perform projection, then restore"""
+        tensor = tensor.movedim(-2, 0)
+        tensor = self.project_tensor_into_headspace(tensor)
+        tensor = tensor.movedim(0, -2)
+        return tensor
+
+class MergeHeads(nn.Module):
     """
-    A helper virtual layer.
-
-    This is responsible for taking the results
-    of attention and eliminating the heads from
-    it, restoring the original model shape.
+    A helper layer. This layer will
+    take in a tensor with attention heads
+    on it and merge the heads back together.
     """
-    def __init__(self,
-                 flattenProjector: Basics.LinearFactory.Type,
-                 ):
-        self.flattenProjector = flattenProjector
-
-    def __call__(self, attn_result: torch.Tensor)->torch.Tensor:
-        reordered_results = attn_result.movedim(-3, -2)
-        deheaded_results = self.flattenProjector(reordered_results)
-        return deheaded_results
-
-torch.jit.script(RemoveHeads)
-class RemoveHeadsFactory(nn.Module):
-    """
-    A small factory class which generates
-    a virtual layer for removing heads.
-    """
-    Type = RemoveHeads
-
     def __init__(self,
                  d_model: int,
                  heads: int,
@@ -107,7 +72,11 @@ class RemoveHeadsFactory(nn.Module):
 
         super().__init__()
 
-        self.linear = Basics.LinearFactory([heads, d_head], d_model,
-                                           parallel, dtype, device)
-    def forward(self)->RemoveHeads:
-        return RemoveHeads(self.linear())
+        self.merge_heads = Basics.Linear([heads, d_head], d_model,
+                                         parallel, dtype, device)
+    def forward(self, tensor: torch.Tensor)->torch.Tensor:
+        """Move the head dimension next to the embedding dimension, merge, return"""
+        tensor = tensor.movedim(-2, 0)
+        tensor = self.merge_heads(tensor)
+        tensor = tensor.movedim(0, -2)
+        return tensor

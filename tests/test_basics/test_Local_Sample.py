@@ -45,7 +45,6 @@ def native_1d_example_generator(test_list: torch.Tensor, start: int, end: int, s
     output: List[torch.Tensor] = []
     iterater = range(0, test_list.shape[-1], stride)
     for i in iterater:
-
         if start <= end:
             options = torch.range(start, end).to(dtype=torch.int64) * dilation + i + offset
         else:
@@ -273,7 +272,7 @@ class test_gen_stridenum(unittest.TestCase):
         for option in self.options:
             try:
                 min_expected, max_expected = native_stridenum_generator(self.tensor, *option)
-                min_got, max_got = Local_Sample.calculate_stridenums(self.dim_lengths, *option)
+                min_got, max_got = local_sample.calculate_stridenums(self.dim_lengths, *option)
                 if min_expected is not None:
                     self.assertTrue(min_expected == min_got)
                 if max_expected is not None:
@@ -281,7 +280,7 @@ class test_gen_stridenum(unittest.TestCase):
             except Exception as err:
                 #Can set break points here when troubleshooting
                 min_expected, max_expected = native_stridenum_generator(self.tensor, *option)
-                min_got, max_got = Local_Sample.calculate_stridenums(self.dim_lengths, *option)
+                min_got, max_got = local_sample.calculate_stridenums(self.dim_lengths, *option)
                 if min_expected is not None:
                     self.assertTrue(min_expected == min_got)
                 if max_expected is not None:
@@ -298,7 +297,7 @@ class test_gen_stridenum(unittest.TestCase):
         dilations = torch.tensor([4])
         offsets = torch.tensor([-1])
 
-        scripted_func = torch.jit.script(Local_Sample.calculate_stridenums)
+        scripted_func = torch.jit.script(local_sample.calculate_stridenums)
         output = scripted_func(dim_length, starts, ends, strides, dilations, offsets)
 
 class test_native_cases(unittest.TestCase):
@@ -350,12 +349,12 @@ class test_native_cases(unittest.TestCase):
 
             try:
                 expected = native_1d_example_generator(tensor, *option)
-                got = Local_Sample.local_sample(tensor, *option, mode="native")
+                got = local_sample.local(tensor, *option, mode="native")
                 self.assertTrue(torch.all(expected == got))
             except Exception as err:
 
                 expected = native_1d_example_generator(tensor, *option)
-                got = Local_Sample.local_sample(tensor, *option, mode="native")
+                got = local_sample.local(tensor, *option, mode="native")
                 self.assertTrue(torch.all(expected == got))
                 raise err
 
@@ -390,12 +389,12 @@ class test_native_cases(unittest.TestCase):
 
             try:
                 expected = native_nd_example_generator(tensor, start, end, stride, dilation, offset)
-                got = Local_Sample.local_sample(tensor, start, end, stride, dilation, offset, mode="native")
+                got = local_sample.local(tensor, start, end, stride, dilation, offset, mode="native")
                 self.assertTrue(torch.all(expected == got))
             except Exception as err:
                 #Set breakpoints here when debugging.
                 expected = native_nd_example_generator(tensor, start, end, stride, dilation, offset)
-                got = Local_Sample.local_sample(tensor, start, end, stride, dilation, offset, mode="native")
+                got = local_sample.local(tensor, start, end, stride, dilation, offset, mode="native")
                 self.assertTrue(torch.all(expected == got))
 
     def test_indirect_case(self):
@@ -427,12 +426,12 @@ class test_native_cases(unittest.TestCase):
 
             try:
                 expected = native_nd_example_generator(tensor, start, end, stride, dilation, offset)
-                got = Local_Sample.local_sample(tensor, start, end, stride, dilation, offset, mode="native")
+                got = local_sample.local(tensor, start, end, stride, dilation, offset, mode="native")
                 self.assertTrue(torch.all(expected == got))
             except Exception as err:
                 # Set breakpoints here when debugging.
                 expected = native_nd_example_generator(tensor, start, end, stride, dilation, offset)
-                got = Local_Sample.local_sample(tensor, start, end, stride, dilation, offset, mode="native")
+                got = local_sample.local(tensor, start, end, stride, dilation, offset, mode="native")
                 self.assertTrue(torch.all(expected == got))
 
 class test_padded_cases(unittest.TestCase):
@@ -488,12 +487,12 @@ class test_padded_cases(unittest.TestCase):
 
             try:
                 expected = padded_1d_example_generator(tensor, *option)
-                got = Local_Sample.local_sample(tensor, *option, mode="pad")
+                got = local_sample.local(tensor, *option, mode="pad")
                 self.assertTrue(torch.all(expected == got))
             except Exception as err:
 
                 expected = padded_1d_example_generator(tensor, *option)
-                got = Local_Sample.local_sample(tensor, *option, mode="pad")
+                got = local_sample.local(tensor, *option, mode="pad")
                 self.assertTrue(torch.all(expected == got))
 
                 raise err
@@ -524,7 +523,7 @@ class test_padded_cases(unittest.TestCase):
         for option in options:
             try:
                 expected = padded_nd_example_generator(tensor, *option)
-                got = Local_Sample.local_sample(tensor, *option, mode="pad")
+                got = local_sample.local(tensor, *option, mode="pad")
                 self.assertTrue(torch.all(expected == got))
             except Exception as err:
                 #Set breakpoints here when debugging.
@@ -533,7 +532,7 @@ class test_padded_cases(unittest.TestCase):
                 expected = padded_nd_example_generator(tensor, *option)
                 print(expected[0], "done")
 
-                got = Local_Sample.local_sample(tensor, *option, mode="pad")
+                got = local_sample.local(tensor, *option, mode="pad")
                 self.assertTrue(torch.all(expected == got))
             counter += 1
             if counter % 1000 == 0:
@@ -674,13 +673,13 @@ class test_circular_local_kernel(unittest.TestCase):
                                                               stride,
                                                               dilation,
                                                               offset)
-                got = Local_Sample.local_sample(tensor,
-                                                start,
-                                                end,
-                                                stride,
-                                                dilation,
-                                                offset,
-                                                mode = "replicate")
+                got = local_sample.local(tensor,
+                                         start,
+                                         end,
+                                         stride,
+                                         dilation,
+                                         offset,
+                                         mode = "replicate")
                 self.assertTrue(torch.all(expected == got))
             except Exception as err:
                 expected = self.circular_1d_example_generator(tensor,
@@ -689,13 +688,13 @@ class test_circular_local_kernel(unittest.TestCase):
                                                               stride,
                                                               dilation,
                                                               offset)
-                got = Local_Sample.local_sample(tensor,
-                                                start,
-                                                end,
-                                                stride,
-                                                dilation,
-                                                offset,
-                                                mode = "replicate")
+                got = local_sample.local(tensor,
+                                         start,
+                                         end,
+                                         stride,
+                                         dilation,
+                                         offset,
+                                         mode = "replicate")
                 self.assertTrue(torch.all(expected == got))
 
     def test_nd_case(self):
@@ -722,18 +721,18 @@ class test_circular_local_kernel(unittest.TestCase):
         for option in options:
             try:
                 expected = self.circular_nd_example_generator(tensor, *option)
-                got = Local_Sample.local_sample(tensor, *option, mode="replicate")
+                got = local_sample.local(tensor, *option, mode="replicate")
                 self.assertTrue(torch.all(expected == got))
             except Exception as err:
                 #Set breakpoints here when debugging.
                 expected = self.circular_nd_example_generator(tensor, *option)
-                got = Local_Sample.local_sample(tensor, *option, mode="replicate")
+                got = local_sample.local(tensor, *option, mode="replicate")
                 self.assertTrue(torch.all(expected == got))
 
 
-class test_LayerFactory(unittest.TestCase):
+class test_Layer(unittest.TestCase):
     """
-    Test the factory makes sane local operations
+    Test the layer will sanely apply the function
     """
     def test_factory(self):
 
@@ -745,15 +744,14 @@ class test_LayerFactory(unittest.TestCase):
         offset = 0
         mode = "pad"
 
-        factory = Local_Sample.LocalFactory(start_nodes,
-                                            end_nodes,
-                                            stride,
-                                            dilation,
-                                            offset,
-                                            mode
-                                            )
+        layer = local_sample.Local(start_nodes,
+                                     end_nodes,
+                                     stride,
+                                     dilation,
+                                     offset,
+                                     mode
+                                    )
 
-        instance = factory()
-        output = instance(test_tensor)
+        output = layer(test_tensor)
         self.assertTrue(output.shape == torch.Size([10, 23, 52, 5, 7]))
 

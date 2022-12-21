@@ -36,13 +36,13 @@ class TestKernelSuperposition(unittest.TestCase):
 
         #Standard
 
-        output = Core.make_dense_superposition(dynamics, kernel, dynamic_shape, None)
+        output = Core.make_dense_superposition(dynamics, kernel, dynamic_shape)
         self.assertTrue(output.shape == expected_shape)
 
         #Torchscript
 
         function = torch.jit.script(Core.make_dense_superposition)
-        output = function(dynamics, kernel, dynamic_shape, None)
+        output = function(dynamics, kernel, dynamic_shape)
         self.assertTrue(output.shape == expected_shape)
 
     def test_sparse_superposition(self):
