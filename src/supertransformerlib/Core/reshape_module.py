@@ -10,7 +10,7 @@ import torch
 from torch import nn
 
 import src.supertransformerlib.Core.errors as Errors
-import src.supertransformerlib.Core.functions as Functions
+import src.supertransformerlib.Core.Functions as Functions
 import src.supertransformerlib.Core.string_util as StringUtil
 import src.supertransformerlib.Core.sparse_utils as SparseUtil
 
@@ -140,7 +140,7 @@ def _sparse_reshape(tensor: torch.Tensor,
 
     return output
 
-def _validate_dense_reshape(tensor: torch.Tensor,
+def validate_dense_reshape(tensor: torch.Tensor,
                      input_shape: torch.Tensor,
                      output_shape: torch.Tensor,
                      task: Optional[str] = None
@@ -243,33 +243,42 @@ def reshape(tensor: torch.Tensor,
         return _sparse_reshape(tensor, input_shape, output_shape)
     else:
         if validate:
-            _validate_dense_reshape(tensor, input_shape, output_shape, task)
+            validate_dense_reshape(tensor, input_shape, output_shape, task)
         return dense_reshape(tensor, input_shape, output_shape)
 
-class Reshape(nn.Module):
+class ReshapeClosure:
     """
     A layer to perform the same reshape
-    operation over and over again.
-
-    Initialize it with the parameters
-    for a reshape call, and it will perform
-    said call when forward is used.
+    operation over and over. It also save
+    and scripts nicely.
     """
     def __init__(self,
-                 input_shape: Functions.StandardShapeType,
-                 output_shape: Functions.StandardShapeType,
-                 validate: bool = True,
-                 task: Optional[str] = None):
-        super().__init__()
-        self.input_shape = Functions.standardize_shape(input_shape, "input_shape")
-        self.output_shape = Functions.standardize_shape(output_shape, "output_shape")
-        self.validate = validate
+                 initial_shape: Functions.StandardShapeType,
+                 final_shape: Functions.StandardShapeType,
+                 task: Optional[str]):
+
+        self.initial_shape = initial_shape
+        self.final_shape = final_shape
         self.task = task
+    def __call__(self, tensor: torch.Tensor)->torch.Tensor:
+        return reshape(tensor, self.initial_shape, self.final_shape, task=self.task)
 
-    def forward(self, tensor: torch.Tensor)->torch.Tensor:
-        return reshape(tensor,
-                       self.input_shape,
-                       self.output_shape,
-                       self.validate,
-                       self.task)
+class ReshapeFactory(nn.Module):
+    """
+    A factory to generate modules to perform reshape.
 
+    It also saves and loads nicely.
+    """
+    VirtualType = ReshapeClosure
+    def __init__(self,
+                 initial_shape: Functions.StandardShapeType,
+                 final_shape: Functions.StandardShapeType):
+        super().__init__()
+
+        initial_shape = Functions.standardize_shape(initial_shape, 'initial_shape', task="setting up reshape")
+        final_shape = Functions.standardize_shape(final_shape, 'final_shape', task='setting up reshape')
+
+        self.register_buffer('input_shape', initial_shape)
+        self.register_buffer('output_shape', final_shape)
+    def forward(self, task: Optional[str] = None)->ReshapeClosure:
+        return ReshapeClosure(self.input_shape, self.output_shape, task=task)
