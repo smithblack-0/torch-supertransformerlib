@@ -9,12 +9,12 @@ from typing import Optional, List
 import torch
 from torch import nn
 
-import src.supertransformerlib.Core.errors as Errors
-import src.supertransformerlib.Core.functions as Functions
-import src.supertransformerlib.Core.string_util as StringUtil
-import src.supertransformerlib.Core.sparse_utils as SparseUtil
+from . import errors
+from . import functions
+from . import string_util
+from . import sparse_utils
 
-class ReshapeException(Errors.ValidationError):
+class ReshapeException(errors.ValidationError):
     """
     A error type for when reshape fails
     """
@@ -40,7 +40,7 @@ def validate_sparse_reshape(tensor: torch.Tensor,
         Are you trying to reshape the dense part of a hybrid tensor? That is
         not currently supported. 
         """
-        reason = StringUtil.dedent(reason)
+        reason = string_util.dedent(reason)
         raise ReshapeException(reason, task)
 
     sparse_shape = tensor.shape[:sparse_dim]
@@ -55,7 +55,7 @@ def validate_sparse_reshape(tensor: torch.Tensor,
         instruction we were provided with was to work with something which has last
         sparse dimensions of shape {temp_input_shape}. This was not compatible
         """
-        reason = StringUtil.dedent(reason)
+        reason = string_util.dedent(reason)
         raise ReshapeException(reason, task)
 
     # Now th
@@ -71,7 +71,7 @@ def validate_sparse_reshape(tensor: torch.Tensor,
             These do not match.
 
         """
-        reason = StringUtil.dedent(reason)
+        reason = string_util.dedent(reason)
         raise ReshapeException(reason, task)
 
 
@@ -103,7 +103,7 @@ def _sparse_reshape(tensor: torch.Tensor,
     sparse_dim = tensor.sparse_dim()
     sparse_shape = tensor.shape[:sparse_dim]
     dense_shape = tensor.shape[sparse_dim:]
-    sparse_strides = SparseUtil.calculate_shape_strides(sparse_shape)
+    sparse_strides = sparse_utils.calculate_shape_strides(sparse_shape)
 
     indices = tensor.indices()
     values = tensor.values()
@@ -117,7 +117,7 @@ def _sparse_reshape(tensor: torch.Tensor,
     static_shape = torch.tensor(sparse_shape[:-broadcast_length], dtype=torch.int64)
     final_shape = torch.concat([static_shape, output_shape])
     final_shape_as_list: List[int] = final_shape.tolist() #Line required or torchscript throws a hissy fit
-    final_strides = SparseUtil.calculate_shape_strides(final_shape_as_list)
+    final_strides = sparse_utils.calculate_shape_strides(final_shape_as_list)
 
     # Use strides to reassemble flat indices. This is a little
     # complex, so here is what is going on
@@ -156,7 +156,7 @@ def _validate_dense_reshape(tensor: torch.Tensor,
         Param 'tensor' has rank {tensor_dim}. 
         However, Param 'input_shape' is {input_dim} units long.
         """
-        reason = StringUtil.dedent(reason)
+        reason = string_util.dedent(reason)
         raise ReshapeException(reason, task)
 
     # Verify that the input_shape matches the tensor dynamic_shape on
@@ -172,7 +172,7 @@ def _validate_dense_reshape(tensor: torch.Tensor,
             The param 'tensor' has dynamic_shape {tensor_shape}.
             This cannot be broadcast with {temp_input_shape}.
         """
-        reason = StringUtil.dedent(reason)
+        reason = string_util.dedent(reason)
         raise ReshapeException(reason, task)
 
     if input_shape.prod() != output_shape.prod():
@@ -187,7 +187,7 @@ def _validate_dense_reshape(tensor: torch.Tensor,
             These do not match.
 
         """
-        reason = StringUtil.dedent(reason)
+        reason = string_util.dedent(reason)
         raise ReshapeException(reason, task)
 
 def dense_reshape(tensor: torch.Tensor,
@@ -207,8 +207,8 @@ def dense_reshape(tensor: torch.Tensor,
 
 
 def reshape(tensor: torch.Tensor,
-            input_shape: Functions.StandardShapeType,
-            output_shape: Functions.StandardShapeType,
+            input_shape: functions.StandardShapeType,
+            output_shape: functions.StandardShapeType,
             validate: bool = True,
             task: Optional[str] = None,
             ) -> torch.Tensor:
@@ -234,8 +234,8 @@ def reshape(tensor: torch.Tensor,
     :return: The reshaped tensor
     """
 
-    input_shape = Functions.standardize_shape(input_shape, "input_shape")
-    output_shape = Functions.standardize_shape(output_shape, "output_shape")
+    input_shape = functions.standardize_shape(input_shape, "input_shape")
+    output_shape = functions.standardize_shape(output_shape, "output_shape")
 
     if tensor.is_sparse:
         if validate:
@@ -256,13 +256,13 @@ class Reshape(nn.Module):
     said call when forward is used.
     """
     def __init__(self,
-                 input_shape: Functions.StandardShapeType,
-                 output_shape: Functions.StandardShapeType,
+                 input_shape: functions.StandardShapeType,
+                 output_shape: functions.StandardShapeType,
                  validate: bool = True,
                  task: Optional[str] = None):
         super().__init__()
-        self.input_shape = Functions.standardize_shape(input_shape, "input_shape")
-        self.output_shape = Functions.standardize_shape(output_shape, "output_shape")
+        self.input_shape = functions.standardize_shape(input_shape, "input_shape")
+        self.output_shape = functions.standardize_shape(output_shape, "output_shape")
         self.validate = validate
         self.task = task
 

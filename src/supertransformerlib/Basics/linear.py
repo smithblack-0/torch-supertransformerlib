@@ -15,12 +15,10 @@ from typing import Optional, List
 import torch
 
 from torch import nn
-from src.supertransformerlib.Core import errors as Errors
-from src.supertransformerlib.Core import functions as Functions
-from src.supertransformerlib import Core
+from .. import Core
 
 
-class LinearForwardException(Errors.ValidationError):
+class LinearForwardException(Core.ValidationError):
     """
     Called when catching an error during
     the forward phase
@@ -33,7 +31,7 @@ class LinearForwardException(Errors.ValidationError):
         super().__init__(typing, reason, task)
 
 
-class LinearCreationException(Errors.ValidationError):
+class LinearCreationException(Core.ValidationError):
     """
     Called when something goes wrong on creating
     a linear layer.
@@ -46,7 +44,7 @@ class LinearCreationException(Errors.ValidationError):
         super().__init__(typing, reason, task)
 
 
-class LinearFactoryException(Errors.ValidationError):
+class LinearFactoryException(Core.ValidationError):
     """
     Called when something goes wrong when making
     the linear closure in the first place
@@ -232,9 +230,9 @@ class Linear(nn.Module):
         return parameter
 
     def __init__(self,
-                 input_shape: Functions.StandardShapeType,
-                 output_shape: Functions.StandardShapeType,
-                 parallel: Optional[Functions.StandardShapeType] = None,
+                 input_shape: Core.StandardShapeType,
+                 output_shape: Core.StandardShapeType,
+                 parallel: Optional[Core.StandardShapeType] = None,
                  dtype: Optional[torch.dtype] = None,
                  device: Optional[torch.device] = None,
                  use_bias: bool = True,
@@ -251,11 +249,11 @@ class Linear(nn.Module):
         super().__init__()
 
         task = "Creating a linear layer"
-        input_shape = Functions.standardize_shape(input_shape, 'input_shape', task=task)
-        output_shape = Functions.standardize_shape(output_shape, 'output_shape', task=task)
+        input_shape = Core.standardize_shape(input_shape, 'input_shape', task=task)
+        output_shape = Core.standardize_shape(output_shape, 'output_shape', task=task)
 
         if parallel is not None:
-            parallel = Functions.standardize_shape(parallel, 'parallel', task=task)
+            parallel = Core.standardize_shape(parallel, 'parallel', task=task)
 
         self.input_shape = input_shape
         self.output_shape = output_shape

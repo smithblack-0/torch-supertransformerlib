@@ -6,9 +6,8 @@ A module containing a variety of simple functions
 from typing import Union, List, Optional
 
 import torch
-import src.supertransformerlib.Core.string_util as StringUtil
-import src.supertransformerlib.Core.errors as Errors
-
+from . import string_util as StringUtil
+from . import errors as Errors
 StandardShapeType = Union[torch.Tensor, List[int], int]
 
 

@@ -7,7 +7,7 @@ for performing a particular convolution can be developed. These include
 but are not exclusively restricted to parameters based around dilation,
 prior elements, post elements, and offset.
 """
-from typing import Optional, Tuple
+from typing import Optional, Tuple, List
 import torch
 from torch import nn
 from torch.nn import functional as F
@@ -438,11 +438,11 @@ def local(
 
     # Perform primary validation
 
-    start = src.supertransformerlib.Core.Functions.standardize_shape(start, 'start', True, True, task)
-    end = src.supertransformerlib.Core.Functions.standardize_shape(end, 'end', True, True, task)
-    stride = src.supertransformerlib.Core.Functions.standardize_shape(stride, 'stride', False, False, task)
-    dilation = src.supertransformerlib.Core.Functions.standardize_shape(dilation, 'dilation', False, False, task)
-    offset = src.supertransformerlib.Core.Functions.standardize_shape(offset, 'offset', True, True, task)
+    start = Core.standardize_shape(start, 'start', True, True, task)
+    end = Core.standardize_shape(end, 'end', True, True, task)
+    stride =Core.standardize_shape(stride, 'stride', False, False, task)
+    dilation = Core.standardize_shape(dilation, 'dilation', False, False, task)
+    offset = Core.standardize_shape(offset, 'offset', True, True, task)
 
     if start.shape[0] > tensor.dim():
         reason = f"""\
@@ -451,7 +451,7 @@ def local(
         while the tensor only had rank {tensor.dim()}. This is not
         allowed.
         """
-        reason = src.supertransformerlib.Core.StringUtil.dedent(reason)
+        reason = Core.string_util.dedent(reason)
         raise LocalError(reason, task)
     if start.shape[0] != end.shape[0]:
         reason = f"""\
@@ -459,7 +459,7 @@ def local(
         the same rank. 'start' has rank {start.shape[0]}
         while 'end' has rank {end.shape[0]}
         """
-        reason = src.supertransformerlib.Core.StringUtil.dedent(reason)
+        reason = Core.string_util.dedent(reason)
         raise LocalError(reason, task)
     if start.shape[0] != stride.shape[0]:
         reason = f"""\
@@ -467,7 +467,7 @@ def local(
         same rank. 'start' has rank {start.shape[0]} while
         'stride' has rank {stride.shape[0]}
         """
-        reason = src.supertransformerlib.Core.StringUtil.dedent(reason)
+        reason =Core.string_util.dedent(reason)
         raise LocalError(reason, task)
     if start.shape[0] != dilation.shape[0]:
         reason = f"""\
@@ -475,7 +475,7 @@ def local(
         the same rank. 'start' has rank {start.shape[0]} while
         'dilation' has rank {dilation.shape[0]}
         """
-        reason = src.supertransformerlib.Core.StringUtil.dedent(reason)
+        reason = Core.string_util.dedent(reason)
         raise LocalError(reason, task)
     if start.shape[0] != offset.shape[0]:
         reason = f"""\
@@ -483,14 +483,14 @@ def local(
         same rank. 'start' had rank {start.shape[0]} while offset
         had rank {offset.shape[0]}
         """
-        reason = src.supertransformerlib.Core.StringUtil.dedent(reason)
+        reason = Core.string_util.dedent(reason)
         raise LocalError(reason, task)
     if torch.any(start > end):
         reason = f"""\
         Start nodes were higher than end nodes. This is not 
         allowed. 
         """
-        reason = src.supertransformerlib.Core.StringUtil.dedent(reason)
+        reason = Core.string_util.dedent(reason)
         raise LocalError(reason, task)
 
     if mode == "native":

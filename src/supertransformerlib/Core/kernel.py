@@ -11,12 +11,10 @@ from typing import Callable, Optional
 import torch
 from torch import nn
 
-import src.supertransformerlib.Core.errors as Errors
-import src.supertransformerlib.Core.functions as Functions
-import src.supertransformerlib.Core.reshape_module as Reshape
-import src.supertransformerlib.Core.string_util as StringUtil
-from src.supertransformerlib.Core import functions
-
+from . import errors as Errors
+from . import reshape_module as Reshape
+from . import string_util as StringUtil
+from . import functions
 class KernelSetupError(Errors.ValidationError):
     """
     An error which occurred while setting

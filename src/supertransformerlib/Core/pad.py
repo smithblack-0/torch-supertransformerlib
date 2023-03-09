@@ -7,11 +7,8 @@ padding function for circular padding.
 from typing import Optional, List
 
 import torch
-
-from src.supertransformerlib import Core
-from src.supertransformerlib.Core import errors as Errors
-
-
+from . import errors as Errors
+from . import string_util
 class PaddingException(Errors.ValidationError):
     """
     An exception to raise when something
@@ -124,7 +121,7 @@ def pad_circular(tensor: torch.Tensor, paddings: List[int], task: Optional[str] 
         'padding' should be even. However, found
         length of {len(paddings)}
         """
-        reason = Core.dedent(reason)
+        reason = string_util.dedent(reason)
         raise PaddingException(reason, task, paddings, tensor)
 
     if len(paddings) // 2 > tensor.dim():
@@ -134,7 +131,7 @@ def pad_circular(tensor: torch.Tensor, paddings: List[int], task: Optional[str] 
         of {len(paddings)//2}. The padding rank cannot be greater
         than the tensor rank.
         """
-        reason = Core.dedent(reason)
+        reason = string_util.dedent(reason)
         raise PaddingException(reason, task, paddings, tensor)
 
     if torch.tensor(tensor.shape).prod() == 0:
@@ -145,7 +142,7 @@ def pad_circular(tensor: torch.Tensor, paddings: List[int], task: Optional[str] 
         
         This is not allowed when using circular padding. 
         """
-        reason = Core.dedent(reason)
+        reason = string_util.dedent(reason)
         raise PaddingException(reason, task, paddings, tensor)
 
     if torch.any(torch.tensor(paddings) < 0):
@@ -157,7 +154,7 @@ def pad_circular(tensor: torch.Tensor, paddings: List[int], task: Optional[str] 
         
         Provided paddings were {paddings}
         """
-        reason = Core.dedent(reason)
+        reason = string_util.dedent(reason)
         raise PaddingException(reason, task, paddings, tensor)
 
     return _pad_circular(tensor, paddings)
