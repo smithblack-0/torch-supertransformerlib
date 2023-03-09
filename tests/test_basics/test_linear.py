@@ -3,10 +3,7 @@ import unittest
 import torch
 from torch import nn
 from src.supertransformerlib.Basics import linear
-from src.supertransformerlib.Core import sparse_utils
-from src.supertransformerlib import Core
-from src.supertransformerlib.Core import reshape_module
-print_errors = True
+PRINT_ERRORS = True
 
 class testForwardWithBias(unittest.TestCase):
     """
@@ -19,7 +16,7 @@ class testForwardWithBias(unittest.TestCase):
         bias = torch.randn([5])
         expected_shape = torch.Size([5])
 
-        output = Linear._linear_forward(tensor, kernel, bias)
+        output = linear._linear_forward(tensor, kernel, bias)
         self.assertTrue(output.shape == expected_shape)
     def test_batched_linear(self):
         """Test the linear operator works when handling batches"""
@@ -28,7 +25,7 @@ class testForwardWithBias(unittest.TestCase):
         bias = torch.randn([5])
         expected_shape = torch.Size([15, 5])
 
-        output = Linear._linear_forward(tensor, kernel, bias)
+        output = linear._linear_forward(tensor, kernel, bias)
         self.assertTrue(output.shape == expected_shape)
 
     def test_multibatched_linear(self):
@@ -38,7 +35,7 @@ class testForwardWithBias(unittest.TestCase):
         bias = torch.randn([5])
         expected_shape = torch.Size([40, 20, 15, 5])
 
-        output = Linear._linear_forward(tensor, kernel, bias)
+        output = linear._linear_forward(tensor, kernel, bias)
         self.assertTrue(output.shape == expected_shape)
     def test_parallel_kernel_linear(self):
         """Test the linear operators broadcasts across parallel kernels properly"""
@@ -47,7 +44,7 @@ class testForwardWithBias(unittest.TestCase):
         bias = torch.randn([15, 5])
         expected_shape = torch.Size([40, 20, 15, 5])
 
-        output = Linear._linear_forward(tensor, kernel, bias)
+        output = linear._linear_forward(tensor, kernel, bias)
         self.assertTrue(output.shape == expected_shape)
     def test_torchscript_functional_linear(self):
         """Test the linear operators torchscript compile properly"""
@@ -56,7 +53,7 @@ class testForwardWithBias(unittest.TestCase):
         bias = torch.randn([15, 5])
         expected_shape = torch.Size([40, 20, 15, 5])
 
-        function = torch.jit.script(Linear._linear_forward)
+        function = torch.jit.script(linear._linear_forward)
         output = function(tensor, kernel, bias)
         self.assertTrue(output.shape == expected_shape)
 
@@ -71,7 +68,7 @@ class testForwardWithoutBias(unittest.TestCase):
         kernel = torch.randn([10, 5])
         expected_shape = torch.Size([5])
 
-        output = Linear._linear_forward(tensor, kernel)
+        output = linear._linear_forward(tensor, kernel)
         self.assertTrue(output.shape == expected_shape)
 
     def test_batched_linear(self):
@@ -80,7 +77,7 @@ class testForwardWithoutBias(unittest.TestCase):
         kernel = torch.randn([10, 5])
         expected_shape = torch.Size([15, 5])
 
-        output = Linear._linear_forward(tensor, kernel)
+        output = linear._linear_forward(tensor, kernel)
         self.assertTrue(output.shape == expected_shape)
 
     def test_multibatched_linear(self):
@@ -89,7 +86,7 @@ class testForwardWithoutBias(unittest.TestCase):
         kernel = torch.randn([10, 5])
         expected_shape = torch.Size([40, 20, 15, 5])
 
-        output = Linear._linear_forward(tensor, kernel)
+        output = linear._linear_forward(tensor, kernel)
         self.assertTrue(output.shape == expected_shape)
     def test_parallel_kernel_linear(self):
         """Test the linear operators broadcasts across parallel kernels properly"""
@@ -97,7 +94,7 @@ class testForwardWithoutBias(unittest.TestCase):
         kernel = torch.randn([15, 10, 5])
         expected_shape = torch.Size([40, 20, 15, 5])
 
-        output = Linear._linear_forward(tensor, kernel)
+        output = linear._linear_forward(tensor, kernel)
         self.assertTrue(output.shape == expected_shape)
 
 class test_linear_exceptions(unittest.TestCase):
@@ -112,14 +109,14 @@ class test_linear_exceptions(unittest.TestCase):
         tensor = torch.randn([40, 20, 15, 7])
         kernel = torch.randn([15, 10, 5])
         bias = torch.randn([15, 5])
-        expected_error = Linear.LinearForwardException
+        expected_error = linear.LinearForwardException
 
         try:
-            closure = Linear.linear_forward(tensor, kernel, bias)
-            output = closure(tensor)
+            closure = linear.linear_forward(tensor, kernel, bias)
+            closure(tensor)
             raise RuntimeError("No error when there should be")
         except expected_error as err:
-            if print_errors:
+            if PRINT_ERRORS:
                 print(err)
 
     def test_wrong_dtype(self):
@@ -130,13 +127,13 @@ class test_linear_exceptions(unittest.TestCase):
         tensor = torch.randn([40, 20, 15, 7]).to(torch.complex64)
         kernel = torch.randn([15, 10, 5])
         bias = torch.randn([15, 5])
-        expected_error = Linear.LinearForwardException
+        expected_error = linear.LinearForwardException
 
         try:
-            output = Linear.linear_forward(tensor, kernel, bias)
+            linear.linear_forward(tensor, kernel, bias)
             raise RuntimeError("No error when there should be")
         except expected_error as err:
-            if print_errors:
+            if PRINT_ERRORS:
                 print(err)
 
     def test_wrong_parallel_dim(self):
@@ -147,13 +144,13 @@ class test_linear_exceptions(unittest.TestCase):
         tensor = torch.randn([40, 20, 4, 10])
         kernel = torch.randn([15, 10, 5])
         bias = torch.randn([15, 5])
-        expected_error = Linear.LinearForwardException
+        expected_error = linear.LinearForwardException
 
         try:
-            closure = Linear.linear_forward(tensor, kernel, bias)
+            linear.linear_forward(tensor, kernel, bias)
             raise RuntimeError("No error when there should be")
         except expected_error as err:
-            if print_errors:
+            if PRINT_ERRORS:
                 print(err)
 
 class testKernelConstruct(unittest.TestCase):
@@ -165,8 +162,9 @@ class testKernelConstruct(unittest.TestCase):
         parallel = None
         expected_shape = torch.Size([10, 5])
 
-        parameter = Linear.make_kernel(input_shape, output_shape, parallel, None, None)
+        parameter = linear.Linear.make_kernel(input_shape, output_shape, parallel, None, None)
         self.assertTrue(parameter.shape == expected_shape)
+
     def test_complicated(self):
         """Test that initialization works when far more complicated."""
         input_shape = torch.tensor([30, 20])
@@ -174,7 +172,7 @@ class testKernelConstruct(unittest.TestCase):
         parallel = torch.tensor([3, 4])
         expected_shape = torch.Size([3, 4, 600, 5])
 
-        parameter = Linear.make_kernel(input_shape, output_shape, parallel, None, None)
+        parameter = linear.Linear.make_kernel(input_shape, output_shape, parallel, None, None)
         self.assertTrue(parameter.shape == expected_shape)
 
 class testBiasConstruct(unittest.TestCase):
@@ -185,7 +183,7 @@ class testBiasConstruct(unittest.TestCase):
         parallel = None
         expected_shape = torch.Size([5])
 
-        parameter = Linear.make_bias(output_shape, parallel, None, None)
+        parameter = linear.Linear.make_bias(output_shape, parallel, None, None)
         self.assertTrue(parameter.shape == expected_shape)
 
     def test_complicated(self):
@@ -194,14 +192,13 @@ class testBiasConstruct(unittest.TestCase):
         parallel = torch.tensor([3, 4])
         expected_shape = torch.Size([3, 4, 5])
 
-        parameter = Linear.make_bias(output_shape, parallel, None, None)
+        parameter = linear.Linear.make_bias(output_shape, parallel, None, None)
         self.assertTrue(parameter.shape == expected_shape)
 
 
 class testLinear(unittest.TestCase):
     """
-    Tests the linear factory layer. It emits
-    linear closures when called.
+    Tests the linear layer.
     """
 
     def test_basic(self):
@@ -209,10 +206,8 @@ class testLinear(unittest.TestCase):
         tensor = torch.randn([10])
         expected_shape = torch.Size([5])
 
-        layerFactory = Linear.LinearFactory(10, 5)
-        layerFactory = torch.jit.script(layerFactory)
-
-        layer = layerFactory()
+        layer = linear.Linear(10, 5)
+        layer = torch.jit.script(layer)
         output = layer(tensor)
 
         self.assertTrue(output.shape == expected_shape)
@@ -225,9 +220,8 @@ class testLinear(unittest.TestCase):
         output_shape = [3, 2]
 
         expected_shape = torch.Size([10, 3,2])
-        layerFactory = Linear.LinearFactory(input_shape, output_shape)
-        layerFactory = torch.jit.script(layerFactory)
-        layer = layerFactory()
+        layer = linear.Linear(input_shape, output_shape)
+        layer = torch.jit.script(layer)
 
         output = layer(tensor)
         self.assertTrue(expected_shape == output.shape)
@@ -243,9 +237,8 @@ class testLinear(unittest.TestCase):
         }
         expected_shape = torch.Size([7, 5, 4, 6, 5])
 
-        layerFactory = Linear.LinearFactory(**keywords)
-        layerFactory = torch.jit.script(layerFactory)
-        layer = layerFactory()
+        layer = linear.Linear(**keywords)
+        layer = torch.jit.script(layer)
 
         output = layer(tensor)
         self.assertTrue(output.shape == expected_shape)

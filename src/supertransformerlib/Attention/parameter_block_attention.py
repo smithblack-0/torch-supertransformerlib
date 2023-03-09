@@ -16,7 +16,13 @@ class ParameterInjectionException(Core.ValidationError):
     def __init__(self, reason: str):
         super().__init__("ParameterInjectionException", reason)
 
-
+class ParameterBlockAttention(nn.Module):
+    """
+    Parameter Block Attention. Designed to
+    introduce significant additional parameter
+    capability by including a raw block of
+    parameters as attention inputs.
+    """
 class _ParameterBlockAttention:
     """
     The primary virtual layer. The implimentation

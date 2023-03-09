@@ -154,9 +154,6 @@ class TestReshapeLayer(unittest.TestCase):
     def test_reshape(self):
         """Perform test"""
         tensor = torch.randn([10, 3, 10, 32])
-        factory = Core.ReshapeFactory([10, 32], [5, 64])
-        factory = torch.jit.script(factory)
-
-        layer = factory()
-        output = layer(tensor)
+        reshaper = Core.Reshape([10,32], [5, 64])
+        output = reshaper(tensor)
         self.assertTrue(output.shape == torch.Size([10, 3, 5, 64]))

@@ -14,12 +14,14 @@ import torch
 from torch import nn
 from src.supertransformerlib.Attention import Utility
 from src.supertransformerlib import Core
+from src.supertransformerlib import Basics
 
 @torch.jit.script
 @dataclass
 class MemoryTensor:
     Addresses: torch.Tensor
     Contents: torch.Tensor
+
 
 class CommitmentScoringAttn(nn.Module):
     """
@@ -66,6 +68,25 @@ class CommitmentScoringAttn(nn.Module):
         commitment = torch.sigmoid(logits)
         commitment = commitment.unsqueeze(-1)
         return commitment
+
+class MemAlloc(nn.Module):
+    """
+    Creates a fresh memory tensor of batch shape which may
+    be associated with the memory system.
+    """
+    def __init__(self,
+                 d_model: int,
+                 heads: int,
+                 d_head: int,
+                 mem_bank_size: int,
+                 parallel: Optional[Core.StandardShapeType] = None,
+                 dtype: Optional[torch.dtype] = None,
+                 device: Optional[torch.device] = None,
+                 ):
+
+        super().__init__()
+
+
 
 
 class MemSetAddresses(nn.Module):
@@ -118,7 +139,7 @@ class MemSetAddresses(nn.Module):
 
         update = Utility.dot_product_attention(current_addresses,
                                                update_addresses,
-                                               update_content, activation_mode="sigmoid")
+                                               update_content)
 
         commitment = self.make_commitment(current_addresses, update_addresses)
 
@@ -127,11 +148,16 @@ class MemSetAddresses(nn.Module):
         output = MemoryTensor(new_addresses, memory.Contents)
         return output
 
-class MemAddAddress(nn.Module):
+class MemSetContent(nn.Module):
     """
-    Description:
-        Adds to the address portion of memory.
-        Commitment logic is used to ensure addition can be zero.
+    Description
+        Destructively sets to content section of memory. Uses commitment
+        logic to make it easy to skip setting.
+    Action:
+        Take in memoru
+        Take in address to set to.
+        Perform set.
+        Return new memory
     """
     def __init__(self,
                  d_model: int,
@@ -142,6 +168,7 @@ class MemAddAddress(nn.Module):
                  dtype: Optional[torch.dtype] = None,
                  device: Optional[torch.device] = None,
                  ):
+
         super().__init__()
 
         self.make_commitment = CommitmentScoringAttn(heads, mem_bank_size,
@@ -150,30 +177,64 @@ class MemAddAddress(nn.Module):
                                                parallel, dtype, device)
         self.make_content_head = Utility.MakeHead(d_model, heads, d_head,
                                                 parallel, dtype, device)
+        self.norm = nn.LayerNorm(d_head)
 
     def forward(self,
                 memory: MemoryTensor,
                 update_addresses: torch.Tensor,
                 update_content: torch.Tensor) -> MemoryTensor:
         """
-        Performs the update process. memory contains the actual memory tensor
-         which is taken apart and updated with the sum.
+        Performs the update process.
         :param memory: The current memory tensor, which consists of the address, content pair.
         :param update_addresses: The addresses we wish to update at. Used to actually find
          the locations where we dump the content
         :param update_content: The content where we wish to dump info at:
-        :return: A new memory tensor of some sort.
+        :return: A new memory tensor
         """
 
         current_addresses = memory.Addresses
         update_addresses = self.make_address_head(update_addresses)
         update_content = self.make_content_head(update_content)
 
-        update = Utility.dot_product_attention(current_addresses, update_addresses, update_content)
+        update = Utility.dot_product_attention(current_addresses,
+                                               update_addresses,
+                                               update_content)
+
         commitment = self.make_commitment(current_addresses, update_addresses)
 
-        new_addresses = current_addresses + update * commitment
+        new_content = current_addresses * (1 - commitment) + self.norm(update) * commitment
 
-        output = MemoryTensor(new_addresses, memory.Contents)
+        output = MemoryTensor(memory.Addresses, new_content)
         return output
+class MemGetContent(nn.Module):
+    """
+        Description:
 
+        Gets information out of the memory based on an incoming
+        address.
+    Action:
+        Take in memoru
+        Take in address
+        Run attention against memory.
+        Return result.
+    """
+    def __init__(self,
+                 d_model: int,
+                 heads: int,
+                 d_head: int,
+                 parallel: Optional[Core.StandardShapeType] = None,
+                 dtype: Optional[torch.dtype] = None,
+                 device: Optional[torch.device] = None,
+                 ):
+
+        super().__init__()
+
+        self.make_query_head = Utility.MakeHead(d_model, heads, d_head,
+                                                parallel, dtype, device)
+        self.merge_heads = Utility.MergeHeads(d_model, heads, d_head,
+                                              parallel, dtype, device)
+    def forward(self, memory: MemoryTensor, address: torch.Tensor)->torch.Tensor:
+        lookup_address = self.make_query_head(address)
+        attn_outcome = Utility.dot_product_attention(lookup_address, memory.Addresses, memory.Contents)
+        output = self.merge_heads(attn_outcome)
+        return output

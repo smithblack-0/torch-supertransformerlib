@@ -7,19 +7,16 @@ for performing a particular convolution can be developed. These include
 but are not exclusively restricted to parameters based around dilation,
 prior elements, post elements, and offset.
 """
+from typing import Optional, Tuple
 import torch
 from torch import nn
 from torch.nn import functional as F
 
 import src.supertransformerlib.Core as Core
 import src.supertransformerlib.Core.errors
-import src.supertransformerlib.Core.Functions
-import src.supertransformerlib.Core.StringUtil
-from typing import Tuple, List, Optional
+import src.supertransformerlib.Core.functions
+import src.supertransformerlib.Core.string_util
 
-
-# Not actually utilized, but manually impliments the process.
-# It is instead far more efficient to use as strided
 
 class LocalError(src.supertransformerlib.Core.Errors.ValidationError):
     """
@@ -83,15 +80,15 @@ def calculate_stridenums(dim_length: torch.Tensor,
     than the max stride number.
     """
 
-    natural_start = offset + start * dilation  # The theoredical beginning of sampling
-    true_start = torch.where(natural_start < 0, 0, natural_start)  # The actual first location we can sample from
+    natural_start = offset + start * dilation
+    true_start = torch.where(natural_start < 0, 0, natural_start)
     true_start = round_to_nearest_node(true_start, stride, natural_start, "ceiling")
     min_stridenum = torch.div(true_start - natural_start, stride).to(
         dtype=torch.int64)  # The difference divided by strides is the stride num
 
-    kernel_length = (end - start) * dilation + 1  # The length of the kernel
-    natural_end = natural_start + dim_length - 1  # The natural sampling end point, traveling along the kernel
-    end_by = dim_length - kernel_length  # If you do not end by here, you run out of elements
+    kernel_length = (end - start) * dilation + 1
+    natural_end = natural_start + dim_length - 1
+    end_by = dim_length - kernel_length
     true_end = torch.where(natural_end > end_by, end_by, natural_end)
     true_end = round_to_nearest_node(true_end, stride, natural_start, "floor")
     max_stridenum = torch.div(true_end - natural_start, stride, rounding_mode="floor")
@@ -146,7 +143,8 @@ def native_local_sample(
 
     local_lengths = start.shape[0]
     static_shape = torch.tensor(tensor.shape[:-local_lengths], dtype=torch.int64)
-    dimensions_requiring_recalculation = torch.tensor(tensor.shape[-local_lengths:], dtype=torch.int64)
+    dimensions_requiring_recalculation = torch.tensor(tensor.shape[-local_lengths:],
+                                                      dtype=torch.int64)
 
     min_stridenum, max_stridenum = calculate_stridenums(dimensions_requiring_recalculation,
                                                         start,
@@ -261,7 +259,7 @@ def padded_local_sample(
     kernel_length = (end - start + 1) * dilation
     natural_end = natural_start + dim_lengths - 1
     end_padding = natural_end - (
-                dim_lengths - kernel_length - 1)  # The natural sampling end point, traveling along the kernel
+                dim_lengths - kernel_length - 1)
     end_padding = torch.where(end_padding < 0, 0, end_padding)
 
     padding = torch.stack([start_padding, end_padding], dim=-1)
@@ -350,7 +348,7 @@ def circular_local_sample(
     kernel_length = (end - start + 1) * dilation
     natural_end = natural_start + dim_lengths - 1
     end_padding = natural_end - (
-                dim_lengths - kernel_length - 1)  # The natural sampling end point, traveling along the kernel
+                dim_lengths - kernel_length - 1)
     end_padding = torch.where(end_padding < 0, 0, end_padding)
 
     padding = torch.stack([start_padding, end_padding], dim=-1)
@@ -402,7 +400,7 @@ def circular_local_sample(
 
 
 
-def local_sample(
+def local(
         tensor: torch.Tensor,
         start: torch.Tensor,
         end: torch.Tensor,
@@ -520,50 +518,17 @@ def local_sample(
         raise LocalError(reason, task)
 
 
-class Local:
+class Local(nn.Module):
     """
-    A virtual layer implimenting a given local operation.
+    A layer implimenting the local operation
 
-    It may be initialized with the desired local quantities,
-    and will then repeatively call the local sample
-    operation with those specifications.
+    This will repetitively call local, and will
+    also make sure that it is the case that
+    some basic validation is performed as well.
+
+    See Basic function 'local' for more details
+    on design.
     """
-    def __init__(self,
-                 start: torch.Tensor,
-                 end: torch.Tensor,
-                 stride: torch.Tensor,
-                 dilation: torch.Tensor,
-                 offset: torch.Tensor,
-                 mode: str
-                 ):
-        self.start = start
-        self.end = end
-        self.stride = stride
-        self.dilation = dilation
-        self.offset = offset
-        self.mode = mode
-    def __call__(self, tensor: torch.Tensor)->torch.Tensor:
-        return local_sample(tensor,
-                            self.start,
-                            self.end,
-                            self.stride,
-                            self.dilation,
-                            self.offset,
-                            self.mode
-                            )
-
-
-class LocalFactory(nn.Module):
-    """
-    The factory layer for the local sample operation
-
-    Generates local layers to perform a particular sampling
-    pattern. See Basics.Local_Sample.local_sample for more
-    on what each parameter does. This layer will build
-    a virtual layer calling local sample with the
-    specified parameters.
-    """
-    Type = Local
     def __init__(self,
                  start: Core.StandardShapeType,
                  end: Core.StandardShapeType,
@@ -579,22 +544,28 @@ class LocalFactory(nn.Module):
         :param dilation: The dilation of the problem, along each dimension
         :param offset: The offset of the problem, along each dimension
         :param mode: One of 'native', 'pad', or 'replicate'.
-        * Native mode only figures out what local kernels can be completely made using the available tensor materials
-        and returns those
-        * pad mode ensures the primary tensor dimensions remain the same shape, and pads the missing elements with zero
-        * replicate mode creates a infinitely scrolling grid where elements are replicated in sequence to fill in any
-        missing padding zones.
+        * Native mode only figures out what local kernels can be completely made
+        using the available tensor materials and returns those
+        * pad mode ensures the primary tensor dimensions remain the same shape, and pads
+         the missing elements with zero
+        * replicate mode creates a infinitely scrolling grid where elements are replicated
+          in sequence to fill in any missing padding zones.
         """
         super().__init__()
 
 
         # Basic validation
 
-        start = Core.standardize_shape(start, "start", allow_zeros=True, allow_negatives=True)
-        end = Core.standardize_shape(end, "end", allow_zeros=True, allow_negatives=True)
-        stride = Core.standardize_shape(stride, "stride", allow_zeros=False, allow_negatives=False)
-        dilation = Core.standardize_shape(dilation, "dilation", allow_zeros=False, allow_negatives=False)
-        offset = Core.standardize_shape(offset, "offset", allow_zeros=True, allow_negatives=True)
+        start = Core.standardize_shape(start, "start", allow_zeros=True,
+                                       allow_negatives=True)
+        end = Core.standardize_shape(end, "end", allow_zeros=True,
+                                     allow_negatives=True)
+        stride = Core.standardize_shape(stride, "stride", allow_zeros=False,
+                                        allow_negatives=False)
+        dilation = Core.standardize_shape(dilation, "dilation", allow_zeros=False,
+                                          allow_negatives=False)
+        offset = Core.standardize_shape(offset, "offset", allow_zeros=True,
+                                        allow_negatives=True)
 
         valid_modes = ["native", "pad", "replicate"]
         Core.validate_string_in_options(mode, "mode", valid_modes, "padding mode")
@@ -613,10 +584,6 @@ class LocalFactory(nn.Module):
         dilation = torch.broadcast_to(dilation, [target])
         offset = torch.broadcast_to(offset, [target])
 
-
-
-
-
         self.start = start
         self.end = end
         self.stride = stride
@@ -624,8 +591,10 @@ class LocalFactory(nn.Module):
         self.offset = offset
         self.mode = mode
 
-    def forward(self)->Local:
-        return Local(self.start,
+    def forward(self, tensor: torch.Tensor)->torch.Tensor:
+        """Impliments forward by calling functional varient"""
+        return local(tensor,
+                     self.start,
                      self.end,
                      self.stride,
                      self.dilation,

@@ -12,27 +12,31 @@ import torch
 from torch import nn
 
 import src.supertransformerlib.Core.errors as Errors
-import src.supertransformerlib.Core.Functions as Functions
+import src.supertransformerlib.Core.functions as Functions
 import src.supertransformerlib.Core.reshape_module as Reshape
 import src.supertransformerlib.Core.string_util as StringUtil
-
+from src.supertransformerlib.Core import functions
 
 class KernelSetupError(Errors.ValidationError):
+    """
+    An error which occurred while setting
+    up the kernel
+    """
     def __init__(self,
                  reason: Optional[str],
                  task: Optional[str],
                  weights: Optional[torch.Tensor],
                  kernel: torch.Tensor
                  ):
-        type = "Kernel Setup Error"
+        typing = "Kernel Setup Error"
         self.weights = weights
         self.kernel = kernel
-        super().__init__(type, reason, task)
+        super().__init__(typing, reason, task)
 
 def make_dense_superposition(dynamics: torch.Tensor,
                              kernel: torch.Tensor,
                              dynamic_shape: torch.Tensor,
-                             task: Optional[str]) -> torch.Tensor:
+                             ) -> torch.Tensor:
     """
     Makes a superposition of the kernel out of the dynamics weights
     """
@@ -65,7 +69,8 @@ def make_sparse_superposition(dynamics: torch.Tensor,
 
     :param dynamics: The dynamic kernel. Expected to be sparse
     :param kernel: The kernel.
-    :param shape: The dynamic dynamic_shape. Note that due to hybrid tensor restrictions the dynamic_shape should
+    :param shape: The dynamic dynamic_shape. Note that due to hybrid tensor restrictions
+           the dynamic_shape should
         come as [...dynamic_shape, ...batch_shape], since sparse dimensions must remain sparse.
     :return: The superimposed kernel
     """
@@ -95,7 +100,9 @@ def make_sparse_superposition(dynamics: torch.Tensor,
         dynamic_values = dynamic_values.unsqueeze(-1)
 
     dynamic_values = dynamic_values.expand(dynamic_expansion)
-    dynamics = torch.sparse_coo_tensor(dynamics.indices(), dynamic_values, size=dynamic_update_shape)
+    dynamics = torch.sparse_coo_tensor(dynamics.indices(),
+                                       dynamic_values,
+                                       size=dynamic_update_shape)
 
     # Resize the kernel dimension so that they have the same
     # dynamic_shape.
@@ -122,8 +129,6 @@ def make_sparse_superposition(dynamics: torch.Tensor,
 
 torch.jit.script(make_sparse_superposition)
 
-
-
 class Parameter(nn.Module):
     """
     A container for holding a parameter when doing
@@ -141,24 +146,28 @@ class Parameter(nn.Module):
 
     def __init__(self,
                  init_func_: Callable[[torch.Tensor], torch.Tensor],
-                 kernel_shape: Functions.StandardShapeType,
-                 superposition_shape: Optional[Functions.StandardShapeType] = None,
+                 kernel_shape: functions.StandardShapeType,
+                 superposition_shape: Optional[functions.StandardShapeType] = None,
                  dtype: Optional[torch.dtype] = None,
                  device: Optional[torch.device] = None,
                  ):
         """
-        :param init_func: An init function accepting a tensor and performing in-place initialization of the values
+        :param init_func: An init function accepting a tensor and performing in-place
+                          initialization of the values
         :param kernel_shape: The dynamic_shape of the kernel we are making
-        :param superposition_shape: The dynamic_shape of the superposition parts of the kernel. May be none
+        :param superposition_shape: The dynamic_shape of the superposition parts of the kernel.
+               May be none
         :param dtype: The dtype. can be none
         :param device: The device. can be none
         """
 
         super().__init__()
         task = "setting up parameter"
-        kernel_shape = Functions.standardize_shape(kernel_shape, "kernel_shape", task=task)
+        kernel_shape = functions.standardize_shape(kernel_shape, "kernel_shape", task=task)
         if superposition_shape is not None:
-            superposition_shape = Functions.standardize_shape(superposition_shape, "superposition_shape", task = task)
+            superposition_shape = functions.standardize_shape(superposition_shape,
+                                                              "superposition_shape",
+                                                            task = task)
 
         if superposition_shape is not None:
             final_shape = torch.concat([superposition_shape, kernel_shape], dim =0)
@@ -217,12 +226,14 @@ class Parameter(nn.Module):
                 raise KernelSetupError(reason, task, superposition_weights, self.Parameter)
 
             interesting_length = self.Superposition_Shape.shape[0]
-            size = torch.Size(Functions.get_shape_as_list(self.Superposition_Shape))
+            size = torch.Size(functions.get_shape_as_list(self.Superposition_Shape))
             if superposition_weights.shape[:interesting_length] != size:
                 if superposition_weights.shape[-interesting_length:] == size:
-                    front = torch.tensor(superposition_weights.shape[:-interesting_length], dtype=torch.int64)
-                    back = torch.tensor(superposition_weights.shape[-interesting_length:], dtype=torch.int64)
-                    error_shape = Functions.get_shape_as_list(torch.concat([back, front], dim=0))
+                    front = torch.tensor(superposition_weights.shape[:-interesting_length],
+                                         dtype=torch.int64)
+                    back = torch.tensor(superposition_weights.shape[-interesting_length:],
+                                        dtype=torch.int64)
+                    error_shape = functions.get_shape_as_list(torch.concat([back, front], dim=0))
                     right_shape = torch.Size(error_shape)
 
 
@@ -232,7 +243,7 @@ class Parameter(nn.Module):
                     the weight dimensions. 
                     
                     You provided a tensor '{weights_name}' of shape {torch.Size(superposition_weights.shape)} which
-                    is attempting to build the superposition defined by {torch.Size(Functions.get_shape_as_list(self.Superposition_Shape))}. However, 
+                    is attempting to build the superposition defined by {torch.Size(functions.get_shape_as_list(self.Superposition_Shape))}. However, 
                     it is the case that the tensor should have in fact had a shape of {right_shape}. That is, 
                     the superposition should have been defined, then the batch elements. 
                     
@@ -244,7 +255,7 @@ class Parameter(nn.Module):
                     reason = StringUtil.dedent(reason)
                     raise KernelSetupError(reason, task, superposition_weights, self.Parameter)
                 else:
-                    shaping = Functions.get_shape_as_list(self.Superposition_Shape)
+                    shaping = functions.get_shape_as_list(self.Superposition_Shape)
 
                     reason = f"""\
                     The kernel is being built with an expected weight dynamic_shape 
@@ -287,6 +298,12 @@ class Parameter(nn.Module):
             if task is not None:
                 task = task + ": Superimposing using superposition weights"
             if superposition_weights.is_sparse:
-                return make_sparse_superposition(superposition_weights, self.Parameter, self.Superposition_Shape, task)
+                return make_sparse_superposition(superposition_weights,
+                                                 self.Parameter,
+                                                 self.Superposition_Shape,
+                                                 task)
             else:
-                return make_dense_superposition(superposition_weights, self.Parameter, self.Superposition_Shape, task)
+                return make_dense_superposition(superposition_weights,
+                                                self.Parameter,
+                                                self.Superposition_Shape,
+                                                )
