@@ -5,8 +5,8 @@ functions
 
 from typing import List
 import torch
-from src.supertransformerlib.Core import errors
-from src.supertransformerlib.Core import string_util
+from . import errors
+from . import string_util
 def calculate_shape_strides(shape: List[int])->torch.Tensor:
     """
     Calculate and return the strides associated

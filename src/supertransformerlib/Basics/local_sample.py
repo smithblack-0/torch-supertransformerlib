@@ -11,14 +11,9 @@ from typing import Optional, Tuple
 import torch
 from torch import nn
 from torch.nn import functional as F
+from .. import Core
 
-import src.supertransformerlib.Core as Core
-import src.supertransformerlib.Core.errors
-import src.supertransformerlib.Core.functions
-import src.supertransformerlib.Core.string_util
-
-
-class LocalError(src.supertransformerlib.Core.Errors.ValidationError):
+class LocalError(Core.Errors.ValidationError):
     """
     An error to throw when convolution is going badly
     """
@@ -402,11 +397,11 @@ def circular_local_sample(
 
 def local(
         tensor: torch.Tensor,
-        start: torch.Tensor,
-        end: torch.Tensor,
-        stride: torch.Tensor,
-        dilation: torch.Tensor,
-        offset: torch.Tensor,
+        start: Core.StandardShapeType,
+        end: Core.StandardShapeType,
+        stride: Core.StandardShapeType,
+        dilation: Core.StandardShapeType,
+        offset: Core.StandardShapeType,
         mode: str = "pad",
         task: Optional[str] = None,
 ) -> torch.Tensor:
