@@ -119,7 +119,7 @@ class MemoryTensor:
             padding_directive = [0, required_extension_len]
             for _ in range(self._embedding_rank):
                 padding_directive = [0, 0] + padding_directive
-            self.tensor = nn.functional.pad(self.tensor, tuple(padding_directive), value=self._fill)
+            self.tensor = nn.functional.pad(self.tensor, padding_directive, value=self._fill)
 
     def _expand_by_broadcast(self,
                              tensor: torch.Tensor,
@@ -314,7 +314,7 @@ class MemoryTensor:
         """
         if isinstance(batch_coordinate, int):
             batch_coordinate = [batch_coordinate]
-        batch_coordinate = tuple(batch_coordinate)
+        batch_coordinate = list(batch_coordinate)
         self.tensor[batch_coordinate] = self._fill
         self.last_element[batch_coordinate] = 0
 
@@ -337,7 +337,7 @@ class MemoryTensor:
 
         update_len = new_embeddings.size(self._batch_rank)
         source_mask =  num_elements.unsqueeze(-1) > torch.arange(0, update_len, device=new_embeddings.device)
-        destination_mask = torch.full(list(self._batch_shape) + [self._mem_length], False)
+        destination_mask = torch.full(list(self._batch_shape) + [self._mem_length], 0, dtype=torch.bool)
         destination_mask = destination_mask.scatter(dim=-1,
                                                     index=index,
                                                     src=source_mask)

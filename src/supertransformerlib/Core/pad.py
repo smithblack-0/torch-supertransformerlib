@@ -59,9 +59,8 @@ def _pad_circular(tensor: torch.Tensor, paddings: List[int]):
     end_repetitions = torch.ceil(end_padding/dim_lengths).to(dtype=torch.int64)*dim_lengths
     total_repetitions: List[int] = (start_repetitions + end_repetitions + 1).tolist()
 
-    repetition_instruction = [1]*tensor.dim()
-    repetition_instruction[-interesting_length:] = total_repetitions
-
+    repetition_instruction = [1]*(tensor.dim() - interesting_length)
+    repetition_instruction += total_repetitions
 
     buffer = tensor.repeat(repetition_instruction)
 

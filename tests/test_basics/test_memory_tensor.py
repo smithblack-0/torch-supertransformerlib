@@ -182,6 +182,13 @@ class TestMemoryTensor(unittest.TestCase):
 
         self.assertTrue(torch.allclose(expected, cumulative_batch.tensor))
 
+    def test_multidimensional_reset(self):
+        """ Test reset when dealing with multidimensional batches"""
+
+        cumulative_batch = Basics.MemoryTensor([2, 3], None)
+        data = torch.randn([2, 3, 5])
+        cumulative_batch.concat(data)
+        cumulative_batch.reset([0, 0])
     def test_single_embedding_dims(self):
         """ run tests with embeddings active, using random noise"""
 
@@ -289,3 +296,12 @@ class TestMemoryTensor(unittest.TestCase):
         dilation = 1
 
         cumulative_batch.dereference_convolution(index, prior, post)
+
+    def test_torchscript(self):
+        """ Test that torchscript can compile the item"""
+        # Set up the test fixture
+        cumulative_batch = Basics.MemoryTensor(batch_shape=4,
+                                               embedding_shape = None)
+        cumulative_batch = torch.jit.script(cumulative_batch)
+        data = torch.randn([4, 6])
+        cumulative_batch.concat(data)

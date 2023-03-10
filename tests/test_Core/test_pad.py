@@ -71,7 +71,18 @@ class TestCirculuarPadding(unittest.TestCase):
             expected = example_circular_padding(tensor, option)
             got = Core.pad_circular(tensor, option)
             self.assertTrue(torch.all(expected == got))
+    def test_torchscript(self):
+        """ Test the function torchscript compiles"""
+        tensor = torch.arange(1000).view(10, 10, 10)
+        ndim = 2
+        paddings = [[0, 1, 2]]*2*ndim
 
+        options = itertools.product(*paddings)
+        padder = torch.jit.script(Core.pad_circular)
+        for option in options:
+            expected = example_circular_padding(tensor, option)
+            got = padder(tensor, option)
+            self.assertTrue(torch.all(expected == got))
 class TestCircularPaddingErrors(unittest.TestCase):
     """
     Test that the circular padding mechanism is making sane errors.
