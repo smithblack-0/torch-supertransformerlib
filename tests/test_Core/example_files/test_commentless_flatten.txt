@@ -1,0 +1,37 @@
+class D:
+    """
+    This class has been modified from it's original format. It
+    has been modified to not use inheritance and to have no
+    parent classes. Keep in mind this may mean feature such
+    as isinstance and other bits and pieces of code may now
+    thus fail.
+    """
+    '# Code from class of name A'
+    field_A: int = 3
+
+    def method5(self):
+        print('A.method5')
+    '# Code from class of name C'
+
+    @property
+    def redirect(self) -> int:
+        return self.field_A
+
+    @redirect.setter
+    def redirect(self, item: int):
+        self.field_A = item
+
+    def method4(self):
+        print('C.method4')
+    '# Code from class of name B'
+    field_B = 'test'
+
+    def method1(self):
+        print('B.method1')
+    '# Code from class of name D'
+
+    def method2(self):
+        print('D.method2')
+
+    def method3(self):
+        print('D.method3')

@@ -17,7 +17,7 @@ keywords = [
 ]
 dependencies = ["torch >= 1.11","numpy"]
 dynamic = ["version", "description"]
-requires_python = ">=3.8"
+requires_python = ">=3.9"
 
 [project.optional-dependencies]
 doc = ["pytest"]
