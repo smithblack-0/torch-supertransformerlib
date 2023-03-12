@@ -97,6 +97,7 @@ class test_flatten_inheritance(unittest.TestCase):
         # Flatten class heirarchy. No docstring involved.
         class_ast = script.flatten_class_inheritance(D)
         class_code = ast.unparse(class_ast)
+        print(class_code)
 
         # Evaluate flattened code
         namespace = {}
@@ -112,7 +113,7 @@ class test_flatten_inheritance(unittest.TestCase):
         for method in methods:
             original_result = getattr(master_instance, method)()
             new_result = getattr(new_instance, method)()
-            self.assertTrue(original_result == new_result)
+            self.assertTrue(original_result == new_result, (method, original_result, new_result))
 
         for field in fields:
             original_result = getattr(master_instance, field)
@@ -124,7 +125,7 @@ class test_flatten_inheritance(unittest.TestCase):
             new_result = getattr(new_instance, property)
             self.assertTrue(original_result == new_result)
 
-        print(class_code)
+
 class test_script_import_management(unittest.TestCase):
     """
     Test the import management portions of test script
