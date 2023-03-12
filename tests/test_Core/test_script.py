@@ -83,12 +83,16 @@ class test_flatten_inheritance(unittest.TestCase):
             """
             test
             """
-
+            def method1(self):
+                return "D.method1"
             def method2(self):
                 return "D.method2"
 
             def method3(self):
                 return "D.method3"
+
+            def method4(self):
+                return super().method1()
 
         # Flatten class heirarchy. No docstring involved.
         class_ast = script.flatten_class_inheritance(D)
@@ -120,6 +124,7 @@ class test_flatten_inheritance(unittest.TestCase):
             new_result = getattr(new_instance, property)
             self.assertTrue(original_result == new_result)
 
+        print(class_code)
 class test_script_import_management(unittest.TestCase):
     """
     Test the import management portions of test script

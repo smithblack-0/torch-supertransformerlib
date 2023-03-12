@@ -1,6 +1,7 @@
 import inspect
 import ast
 import textwrap
+import copy
 from typing import Type, List, Dict, Optional, Set, Union, Tuple
 
 
@@ -40,7 +41,6 @@ def get_class_inheritance_chain(obj: Type) -> List[Type]:
     Returns:
         List[Type]: A list of class objects representing the inheritance chain for the class.
     """
-    inheritance_chain = []
     output = obj.mro()
     output = output[:-1] #we do not need the top level object
     return output
@@ -102,8 +102,6 @@ def is_property_setter(node: ast.AST) -> bool:
             if isinstance(decorator, ast.Attribute) and decorator.attr == 'setter':
                 return True
     return False
-
-import ast
 
 def is_property_deleter(node: ast.FunctionDef) -> bool:
     """
@@ -173,9 +171,47 @@ def get_field_name(node: Union[ast.Assign, ast.AnnAssign])->List[str]:
     else:
         raise ValueError("Illegal node given")
 
+def get_method_from_class_node(class_node: ast.ClassDef, method_name: str) -> ast.FunctionDef:
+    for node in class_node.body:
+        if isinstance(node, ast.FunctionDef) and node.name == method_name:
+            return node
+    raise ValueError(f"No method named {method_name} found in class {class_node.name}")
 
 
 
+def get_super_info(node: ast.Call)->Tuple[Optional[str], Optional[str]]:
+    if len(node.args) > 0:
+        return node.args[0].id, node.args[1].id
+    return None, None
+def get_super_method_name(node: ast.Call) -> Optional[str]:
+    if isinstance(node.func, ast.Attribute) and\
+            isinstance(node.func.value, ast.Call) and\
+            isinstance(node.func.value.func, ast.Name):
+        method_name = node.func.attr
+        return method_name
+    raise ValueError("Not a super node")
+def find_super_calls(node):
+    super_calls = []
+
+    for child_node in ast.walk(node):
+        if isinstance(child_node, ast.Call) and isinstance(child_node.func, ast.Name) and child_node.func.id == 'super':
+            super_calls.append(child_node)
+
+    return super_calls
+
+def rename_super_call_method(node: ast.Call, new_name: str) -> ast.Call:
+    node.args[1] = ast.Str(new_name)
+    return node
+
+def replace_node_in_function(node: ast.FunctionDef, target: ast.AST, replacement: ast.AST) -> ast.FunctionDef:
+    class NodeReplacer(ast.NodeTransformer):
+        def visit(self, node):
+            if node == target:
+                return replacement
+            return self.generic_visit(node)
+
+    NodeReplacer().visit(node)
+    return node
 def flatten_class_inheritance(obj: Type)->ast.ClassDef:
     """
     Makes a revised version of a particular class which has had
@@ -196,15 +232,18 @@ def flatten_class_inheritance(obj: Type)->ast.ClassDef:
     # not already seen it before.
 
     inheritance_chain = get_class_inheritance_chain(obj)
+    inheritance_ast = [get_ast_from_object(item) for item in inheritance_chain]
+    inheritance_ast = {ast_case.name : ast_case for ast_case in inheritance_ast}
+
     base_node = get_ast_from_object(inheritance_chain[0])
     docstring_node = get_class_docstring_node(base_node)
-    construction_stack: List[Tuple[str, List[ast.AST]]] = []
+    construction_stack: Dict[str, List[ast.Ast]] = {name : [] for name in inheritance_ast.keys()}
 
     known_features = []
     known_setters = []
     known_deleters = []
-    for i, class_type in enumerate(inheritance_chain):
-        class_ast = get_ast_from_object(class_type)
+
+    for i, (class_name, class_ast) in enumerate(inheritance_ast.items()):
 
         if i == 0:
             new_body = [make_comment_node(f"Original code from given class named {class_ast.name}")]
@@ -215,7 +254,49 @@ def flatten_class_inheritance(obj: Type)->ast.ClassDef:
             # The primary challenge and purpose of the
             # following code is to only transfer
             # features which have not been seen
-            # before in the MRO chain.
+            # before in the MRO chain.\
+
+            # A secondary challenge which can occur is that
+            # super nodes must be properly handled, which
+            # will mean replacing the super node with a
+            # private function call.
+
+            if isinstance(node, ast.FunctionDef):
+                # This handles super replacements. Basically,
+                # a super call will start a subroutine that
+                # looks at the super feature being pointed to,
+                # and proceeds to fetch the relevent code
+                # as a method. This is then integrated into
+                # the code stream.
+                super_calls = find_super_calls(node)
+                for call in super_calls:
+
+                    # Figure out what parent we are calling to
+                    subclass, name = get_super_info(call)
+                    if subclass is None:
+                        subclass = class_name
+                    parent_id = list(inheritance_ast.keys()).index(subclass) + 1
+                    parent_name = list(inheritance_ast.keys())[parent_id]
+                    parent = inheritance_ast[parent_name]
+
+                    # Figure out and retrieve the method code,
+                    # then create a renamed version and incorporate it into the
+                    # new body if relevant
+
+                    method_name = get_super_method_name(call)
+                    new_method_name = f"__super_{parent_name}_method_{method_name}"
+                    if new_method_name not in known_features:
+                        method_ast = copy.deepcopy(get_method_from_class_node(parent, method_name))
+                        method_ast.name = new_method_name
+                        new_body.append(method_ast)
+                        known_features.append(new_method_name)
+
+                    # Update the super call
+
+                    new_call = rename_super_call_method(copy.deepcopy(call), new_method_name)
+                    node = replace_node_in_function(node, call, new_call)
+
+
 
             # Handle property getters
             if is_property_getter(node):
@@ -270,7 +351,7 @@ def flatten_class_inheritance(obj: Type)->ast.ClassDef:
 
 
         if len(new_body) > 1:
-            construction_stack.append((class_ast.name, new_body))
+            construction_stack[class_name].extend(new_body)
 
     # Build the new class ast
     synthesis_message = """\
@@ -298,7 +379,8 @@ def flatten_class_inheritance(obj: Type)->ast.ClassDef:
         )
 
 
-    for name, body in construction_stack:
+    for name, body in construction_stack.items():
         new_class.body.extend(body)
 
     return new_class
+
