@@ -135,7 +135,16 @@ def is_docstring(node: ast.AST) -> bool:
     """
     return isinstance(node, ast.Expr) and isinstance(node.value, ast.Str)
 
-
+def is_super_node(node: ast.AST)->bool:
+    """
+    Detect if this node is a representitive for a
+    super node
+    """
+    return isinstance(node, ast.Call) and\
+                    isinstance(node.func, ast.Attribute) and\
+                    isinstance(node.func.value, ast.Call) and\
+                    isinstance(node.func.value.func, ast.Name) and\
+                    node.func.value.func.id == "super"
 def is_method_in_classdef(classdef_node: ast.ClassDef, method_name: str) -> bool:
     """
     Given a ClassDef node and a method name, checks if the method is defined in the class.
@@ -163,7 +172,9 @@ def get_deleter_name(node: ast.FunctionDef)-> str:
 
 def get_method_name(node: ast.FunctionDef) -> str:
     return node.name
-
+def get_self_name_from_method(method: ast.FunctionDef) -> str:
+    self_arg = method.args.args[0]
+    return self_arg.arg
 def get_field_name(node: Union[ast.Assign, ast.AnnAssign])->List[str]:
     # Notably, some assignments can assign more than one thing at once
     output = []
@@ -188,60 +199,134 @@ def get_field_name(node: Union[ast.Assign, ast.AnnAssign])->List[str]:
     else:
         raise ValueError("Illegal node given")
 
-def get_method_from_class_node(class_node: ast.ClassDef, method_name: str) -> ast.FunctionDef:
-    for node in class_node.body:
-        if isinstance(node, ast.FunctionDef) and node.name == method_name:
-            return node
-    raise ValueError(f"No method named {method_name} found in class {class_node.name}")
+def get_super_node_info(node: ast.Call)->Tuple[str, ast.Call]:
+    """
+    Returns the information about the node name, and node call.
+    :param node:
+    :return: A tuple consisting of the name of the method, the call node,
+    and the super node
+    """
+    method_name = node.func.attr
+    call_node = node
+    info = (method_name, call_node)
+    return info
 
+def resolve_method(current_class: str,
+                   method_name: str,
+                   inheritance_ast: Dict[str, ast.ClassDef])->\
+                        Tuple[Optional[str], Optional[ast.FunctionDef]]:
+    """
+    Resoves a method name that is part of a class hierarchy into it's
+    source code. Returns the name of the class which this resolves to,
+    alongside the functiondef node containing the class code. If it
+    is resolving to a builtin, returns None.
 
+    :param current_class: The name of the current parent class
+    :param method_name: The name of the method to resolve
+    :param inheritance_ast: The representation of the mro as ast.
+    :return: A tuple of the class we landed on, and the
+             and the functdef node we tracked down. Or None, None
+             if we resolve to builtins
+    :raises: Value_Error, if we cannot resolve the super call
+    """
+    mro_position = list(inheritance_ast.keys()).index(current_class)
+    if mro_position + 1 == len(inheritance_ast):
+        # We are at the top of the inheritance hierarchy. Either
+        # resolve this as builtin, or throw an error
+        if method_name in dir(object):
+            return None, None
+        else:
+            raise ValueError(f"Could not resolve super method of name {method_name} from class {current_class}")
 
-def get_super_class_info(node: ast.Call)->Tuple[Optional[str], Optional[str]]:
-    if len(node.args) > 0:
-        return node.args[0].id, node.args[1].id
+    for i in range(mro_position + 1, len(inheritance_ast)):
+        name = list(inheritance_ast.keys())[i]
+        class_ast = list(inheritance_ast.values())[i]
+        for node in class_ast.body:
+            if isinstance(node, ast.FunctionDef) and get_method_name(node) == method_name:
+                return name, node
     return None, None
 
-def find_super_node_info(node)->List[Tuple[str, ast.Call, ast.Call]]:
-    super_info = []
-    for child_node in ast.walk(node):
-        # Detect if we are dealing with a super call
-        #
-        # This basically manually follows the ast tree
-        # from the call down to where we actually say super.
-        if isinstance(child_node, ast.Call) and\
-                    isinstance(child_node.func, ast.Attribute) and\
-                    isinstance(child_node.func.value, ast.Call) and\
-                    isinstance(child_node.func.value.func, ast.Name) and\
-                    child_node.func.value.func.id == "super":
 
-            method_name = child_node.func.attr
-            call_node = child_node
-            super_node = child_node.func.value
-            info = (method_name, call_node, super_node)
-            super_info.append(info)
-    return super_info
-
-def rename_super_call_method(node: ast.Call, new_name: str) -> ast.Call:
+def rename_super_call_method(node: ast.Call, new_name: str):
     if isinstance(node.func, ast.Attribute):
         node.func.attr = new_name
         return node
     raise ValueError("Was not handled valid call node")
 
 
-def replace_call_with_self(node: ast.Call) -> ast.Call:
-    return ast.Call(func=ast.Attribute(value=ast.Name(id='self', ctx=ast.Load()),
-                                        attr=node.func.attr,
-                                        ctx=node.func.ctx),
-                    args=node.args, keywords=node.keywords)
-def replace_node_in_function(node: ast.FunctionDef, target: ast.AST, replacement: ast.AST) -> ast.FunctionDef:
-    class NodeReplacer(ast.NodeTransformer):
-        def visit(self, node):
-            if node == target:
-                return replacement
-            return self.generic_visit(node)
+def replace_call_with_self(node: ast.Call, self_name: str):
+    """ Replaces a super call with a self call"""
+    node.func.value = ast.Name(id = self_name)
 
-    NodeReplacer().visit(node)
-    return node
+
+def replace_super_calls(node: ast.FunctionDef,
+                        current_class: str,
+                        inheritance_ast: Dict[str, ast.ClassDef],
+                        known_features: List[str])->Tuple[ast.FunctionDef, Dict[str, ast.FunctionDef]]:
+    """
+    Finds and replaces super calls relevant to the current
+    ast node with helper function calls.
+
+    Returns first the new node with the new calls, and
+    second a tuple of the required addition helper functions
+    needed to allow the node to properly resolve.
+
+    Recursive.
+    """
+    # This handles super replacements. Basically,
+    # a super call will start a subroutine that
+    # looks at the super feature being pointed to
+    # and will build additional helper functions if
+    # needed. The super calls are then renamed to
+    # point to helper functions on self.
+    #
+    # If a helper is already found in known_features,
+    # it is assumed that function will already be available
+    # for usage.
+
+    output = {}
+    node = copy.deepcopy(node)
+    self_name = get_self_name_from_method(node)
+
+    #Walk through the nodes inside the functiondef
+    for subnode in ast.walk(node):
+
+        # Act if super node is detected
+        if is_super_node(subnode):
+            # Fetch the name and node
+            method_name, call_node = get_super_node_info(subnode)
+            parent_name, parent_functdef = resolve_method(current_class,
+                                                          method_name,
+                                                          inheritance_ast)
+            if parent_name is None:
+                # Resolves to builtin. No need for any action
+                continue
+
+            alternate_method_name = f"__super_{parent_name}_{method_name}"
+            if alternate_method_name not in known_features and \
+                    alternate_method_name not in output:
+                # A helper method is needed but has not yet been
+                # built. We build it recursively by fetching the
+                # required updates for a replacement, then
+                # including it into an update.
+
+                update_node, updates = replace_super_calls(
+                            parent_functdef,
+                            parent_name,
+                            inheritance_ast,
+                            known_features
+                        )
+                update_node.name = alternate_method_name
+                updates[alternate_method_name] = update_node
+                output.update(updates)
+
+            #Tell the call node to refer to the helper function instead
+            rename_super_call_method(call_node, alternate_method_name)
+            replace_call_with_self(call_node, self_name)
+    return node, output
+
+
+
 
 
 def flatten_class_inheritance(obj: Type)->ast.ClassDef:
@@ -271,11 +356,12 @@ def flatten_class_inheritance(obj: Type)->ast.ClassDef:
     docstring_node = get_class_docstring_node(base_node)
     construction_stack: Dict[str, List[ast.Ast]] = {name : [] for name in inheritance_ast.keys()}
 
+    # Something that ends up in one of these has already been
+    # encountered before and thus should not be included in the
+    # final output again.
     known_features = []
     known_setters = []
     known_deleters = []
-
-    # The class is modified in two passes. Pass one
 
     for i, (class_name, class_ast) in enumerate(inheritance_ast.items()):
 
@@ -296,108 +382,15 @@ def flatten_class_inheritance(obj: Type)->ast.ClassDef:
             # private function call.
 
             if isinstance(node, ast.FunctionDef):
-                # This handles super replacements. Basically,
-                # a super call will start a subroutine that
-                # looks at the super feature being pointed to,
-                # and proceeds to fetch the relevent code
-                # as a method. This is then integrated into
-                # the code stream. Because super calls may call
-                # super calls, we also integrate a depth-first
-                # search stack'
-                super_stack = [node]
-                visited = set()
-                while len(super_stack) > 0:
-                    subnode = super_stack.pop()
-                    if subnode not in visited:
-                        visited.add(subnode)
-                        super_stack.append(subnode)
-                        children = find_super_node_info(node)
-                        super_stack.extend(reversed(children))
-                    else:
-                        # Finish up
-                        pass
 
-
-
-                while len(super_stack) > 0:
-                    subnode = super_stack.pop()
-                    super_info = find_super_node_info(subnode)
-                    super_stack.extend(reversed(super_info))
-
-
-                    super_calls = super_stack.pop()
-                    for method_name, call_node, super_node in super_calls:
-
-                        # Figure out what parent we are calling for our
-                        # information. To do this, we figure out where
-                        # to start looking then look up the mro chain
-                        # until we find the indicated method.
-
-                        subclass, name = get_super_class_info(super_node)
-                        if subclass is None:
-                            subclass = class_name
-
-                        parent_id_search_from = list(inheritance_ast.keys()).index(subclass) + 1
-                        parent_name = None
-                        for i in range(parent_id_search_from, len(inheritance_ast)):
-                            if is_method_in_classdef(list(inheritance_ast.values())[i], method_name):
-                                parent_name = list(inheritance_ast.keys())[i]
-                                break
-
-                        if parent_name is None:
-                            # Handle the case for builtins.
-                            if method_name in dir(object):
-                                continue
-                            else:
-                                raise ValueError("Attempt to resolve {method_name} for class {class_name} failed")
-
-                        parent = inheritance_ast[parent_name]
-
-                        # Now that the parent ast is found, go ahead and
-
-                super_calls = find_super_node_info(node)
-                for method_name, call_node, super_node in super_calls:
-
-                    # Figure out what parent we are calling for our
-                    # information. To do this, we figure out where
-                    # to start looking then look up the mro chain
-                    # until we find the indicated method.
-                    subclass, name = get_super_class_info(super_node)
-                    if subclass is None:
-                        subclass = class_name
-
-                    parent_id_search_from = list(inheritance_ast.keys()).index(subclass) + 1
-                    parent_name = None
-                    for i in range(parent_id_search_from, len(inheritance_ast)):
-                        if is_method_in_classdef(list(inheritance_ast.values())[i], method_name):
-                            parent_name = list(inheritance_ast.keys())[i]
-                            break
-
-                    if parent_name is None:
-                        # Handle the case for builtins.
-                        if method_name in dir(object):
-                            continue
-                        else:
-                            raise ValueError("Attempt to resolve {method_name} for class {class_name} failed")
-
-                    parent = inheritance_ast[parent_name]
-
-                    # Figure out and retrieve the method code,
-                    # then create a renamed version and incorporate it into the
-                    # new body if relevant
-
-                    new_method_name = f"__super_{parent_name}_method_{method_name}"
-                    if new_method_name not in known_features:
-                        method_ast = copy.deepcopy(get_method_from_class_node(parent, method_name))
-                        method_ast.name = new_method_name
-                        new_body.append(method_ast)
-                        known_features.append(new_method_name)
-
-                    # Update the super call
-                    new_call = rename_super_call_method(copy.deepcopy(call_node), new_method_name)
-                    new_call = replace_call_with_self(new_call)
-                    node = replace_node_in_function(node, call_node, new_call)
-
+                # This handles super replacements.
+                node, helper_code = replace_super_calls(node,
+                                                  class_name,
+                                                  inheritance_ast,
+                                                  known_features)
+                for helper_name, helper_ast in helper_code.items():
+                    new_body.append(helper_ast)
+                    known_features.append(helper_name)
 
 
             # Handle property getters
