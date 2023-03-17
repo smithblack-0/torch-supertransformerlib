@@ -12,7 +12,7 @@ import pathlib
 import sys
 import tempfile
 import inspect
-from typing import Optional, Dict, Any, Union, List, Type, Callable, Tuple
+from typing import Optional, Dict, Any, Union, Type, Callable, Tuple
 
 import torch.jit
 import torch
