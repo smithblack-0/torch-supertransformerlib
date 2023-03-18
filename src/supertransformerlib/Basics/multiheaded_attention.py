@@ -7,7 +7,7 @@ from typing import Optional
 import torch
 from torch import nn
 from . import linear
-from src.supertransformerlib import Core
+from .. import Core
 
 
 def dot_product_attention(
