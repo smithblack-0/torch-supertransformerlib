@@ -1,7 +1,7 @@
 import unittest
 import torch
-from src.supertransformerlib.Basics import MakeHead
-from src.supertransformerlib import Core
+from supertransformerlib.Basics import MakeHead
+from supertransformerlib import Core
 
 class TestMakeHeadReshape(unittest.TestCase):
     """ Tests the make head by reshape varient of make heads"""

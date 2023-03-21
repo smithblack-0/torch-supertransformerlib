@@ -1,7 +1,7 @@
 import unittest
 import torch
 
-from src.supertransformerlib import Core
+from supertransformerlib import Core
 
 class test_calculate_stride(unittest.TestCase):
     def test_calculate_strides(self):

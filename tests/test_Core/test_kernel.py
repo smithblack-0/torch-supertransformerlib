@@ -9,7 +9,7 @@ import unittest
 
 import torch
 from torch.nn import init
-from src.supertransformerlib import Core
+from supertransformerlib import Core
 
 PRINT_ERRORS = True
 

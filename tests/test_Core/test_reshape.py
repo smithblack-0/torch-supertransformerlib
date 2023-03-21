@@ -8,8 +8,8 @@ from typing import Type
 
 import torch
 from torch.nn import functional
-from src.supertransformerlib import Core
-from src.supertransformerlib.Core import reshape_module as Reshape
+from supertransformerlib import Core
+from supertransformerlib.Core import reshape_module as Reshape
 
 #Controls whether or not to print error messages
 #

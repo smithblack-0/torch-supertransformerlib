@@ -1,7 +1,7 @@
 import torch
 import unittest
 from torch.nn import functional as F
-from src.supertransformerlib.NTM import indexer as index_module
+from supertransformerlib.NTM import indexer as index_module
 
 class TestIndexer(unittest.TestCase):
 

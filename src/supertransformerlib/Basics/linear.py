@@ -15,7 +15,7 @@ from typing import Optional, List
 import torch
 
 from torch import nn
-from .. import Core
+from supertransformerlib import Core
 
 
 class LinearForwardException(Core.ValidationError):

@@ -6,7 +6,7 @@ functions which I develop
 
 import unittest
 import textwrap
-from src.supertransformerlib import Core
+from supertransformerlib import Core
 
 class test_functions(unittest.TestCase):
     def test_dedent(self):

@@ -1,7 +1,7 @@
 import unittest
 import torch
 import textwrap
-from src.supertransformerlib.Basics import syncronized_tensor
+from supertransformerlib.Basics import syncronized_tensor
 
 class test_syncronous_logic(unittest.TestCase):
 

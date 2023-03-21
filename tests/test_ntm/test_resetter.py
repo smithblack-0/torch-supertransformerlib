@@ -1,6 +1,6 @@
 import unittest
 import torch
-from src.supertransformerlib.NTM import reset
+from supertransformerlib.NTM import reset
 
 class TestMemoryResetter(unittest.TestCase):
     """ Test the reset memory capabilities"""

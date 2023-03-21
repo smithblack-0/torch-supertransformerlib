@@ -1,7 +1,7 @@
 import unittest
 import textwrap
 import torch
-from src.supertransformerlib.Preprocessing import string_scripting
+from supertransformerlib.Preprocessing import string_scripting
 
 fixture = 4
 class test_string_scripting(unittest.TestCase):

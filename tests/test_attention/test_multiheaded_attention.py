@@ -1,6 +1,6 @@
 import unittest
 import torch
-from src.supertransformerlib.Basics import MultiHeadedAttention
+from supertransformerlib.Basics import MultiHeadedAttention
 
 
 class TestMultiHeadedAttention(unittest.TestCase):

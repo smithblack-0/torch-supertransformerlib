@@ -41,7 +41,7 @@ from typing import Union, List, Optional
 import torch
 from torch import nn
 from . import local_sample
-from .. import Core
+from supertransformerlib import Core
 
 class IndexError(Core.ValidationError):
     """

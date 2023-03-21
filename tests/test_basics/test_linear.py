@@ -2,7 +2,7 @@ import unittest
 
 import torch
 from torch import nn
-from src.supertransformerlib.Basics import linear
+from supertransformerlib.Basics import linear
 PRINT_ERRORS = True
 
 class testForwardWithBias(unittest.TestCase):

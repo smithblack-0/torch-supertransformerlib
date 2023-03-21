@@ -1,7 +1,7 @@
 
 import unittest
 import torch
-from src.supertransformerlib.Preprocessing import preprocess
+from supertransformerlib.Preprocessing import preprocess
 
 class test_flatten_inheritance(unittest.TestCase):
 

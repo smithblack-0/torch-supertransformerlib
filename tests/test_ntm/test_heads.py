@@ -1,8 +1,8 @@
 import torch
 import unittest
 
-import src.NTM.indexer
-from src.NTM import heads
+import NTM.indexer
+from NTM import heads
 
 class TestIndexer(unittest.TestCase):
 
@@ -12,7 +12,7 @@ class TestIndexer(unittest.TestCase):
         batch_shape = 14
 
 
-        indexer = src.NTM.indexer.Indexer
+        indexer = NTM.indexer.Indexer
 
 
 

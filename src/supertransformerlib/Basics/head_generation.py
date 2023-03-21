@@ -2,8 +2,8 @@ from typing import Optional
 
 import torch
 from torch import nn
-from .. import Core
-from ..Basics import linear
+from supertransformerlib import Core
+from supertransformerlib.Basics import linear
 
 
 class MakeHead(nn.Module):

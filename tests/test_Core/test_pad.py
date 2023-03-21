@@ -16,7 +16,7 @@ import torch
 
 
 from torch.nn import functional as F
-from src.supertransformerlib import Core
+from supertransformerlib import Core
 
 PRINT_ERRORS = True
 

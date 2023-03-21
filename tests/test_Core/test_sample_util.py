@@ -10,7 +10,7 @@ of the top k and top n utilities
 import unittest
 import torch
 import itertools
-from src.supertransformerlib import Core
+from supertransformerlib import Core
 
 class test_top_K_Mask(unittest.TestCase):
     """

@@ -1,6 +1,6 @@
 import unittest
 import torch
-from src.supertransformerlib import Basics
+from supertransformerlib import Basics
 
 class TestMemoryValidation(unittest.TestCase):
     """

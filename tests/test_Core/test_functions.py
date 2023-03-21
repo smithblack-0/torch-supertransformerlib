@@ -7,7 +7,7 @@ functions in core
 
 import unittest
 import torch
-from src.supertransformerlib import Core
+from supertransformerlib import Core
 
 class TestFunctions(unittest.TestCase):
     """
