@@ -1,0 +1,38 @@
+class MyClass:
+    '''
+    A metacoded class for handling synchronous memory tensors.
+    Do not edit. Will be overwritten.
+    '''
+    # Fields
+
+    name: str
+    age: int
+    x: MemoryTensor
+    y: MemoryTensor
+
+    #Helper methods
+    def _double(self, x: torch.Tensor):
+        return 2 * x
+
+    def __init__(self, name: str, , age: int, , x: MemoryTensor, y: MemoryTensor):
+        
+        self.name = name
+        self.age = age
+        self.x = x
+        self.y = y
+
+
+    # Transformations
+
+    def double_x(self, x: Tensor):
+        
+        new_x = self._double_x(self.x, new_x)
+        new_y = self._double_x(self.y, new_x)
+        return MyClass(self.name, self.age, new_x, new_y)
+
+    def double_y(self, x: Tensor):
+        
+        new_x = self._double_y(self.x, new_x)
+        new_y = self._double_y(self.y, new_x)
+        return MyClass(self.name, self.age, new_x, new_y)
+
