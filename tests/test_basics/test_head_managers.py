@@ -60,7 +60,7 @@ class TestMakeHeadProject(unittest.TestCase):
         d_model = 8
         heads = 2
         parallel = 10
-        batch = torch.rand(5, 3, 10, d_model)
+        batch = torch.rand(5, 3, parallel, 12, d_model)
         make_head = MakeHead(d_model, heads, mode="project", parallel=parallel)
         result = make_head(batch)
-        self.assertEqual(result.shape, (5, 3, parallel, heads, d_model // heads))
+        self.assertEqual(result.shape, (5, 3, parallel, 12, heads, d_model // heads))

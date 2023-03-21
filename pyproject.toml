@@ -4,7 +4,7 @@ build-backend = "flit_core.buildapi"
 
 [project]
 name = "supertransformerlib"
-version = "2.3.2"
+version = "2.4.0"
 authors = [
     {name = "Christopher M O'Quinn", email = "chrisoquinn.2@gmail.com"}
 ]
@@ -18,7 +18,8 @@ keywords = [
 ]
 dependencies = [
     "torch >= 1.11",
-    "numpy"
+    "numpy",
+    "flit"
 ]
 requires-python = ">=3.9"
 
