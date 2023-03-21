@@ -6,7 +6,7 @@ from typing import Optional, Union, List
 
 import torch
 from torch import nn
-from . import linear
+from supertransformerlib.Basics import linear
 
 class Feedforward(nn.Module):
     """

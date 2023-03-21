@@ -1,5 +1,5 @@
 """NTM Read and Write Heads."""
-from typing import List, Tuple, Dict, Optional
+from typing import Tuple, Optional
 
 import torch
 from torch import nn
@@ -7,111 +7,6 @@ from .. import Core, Basics
 from .indexer import Indexer
 from .reset import WeightsResetter
 
-
-
-class ReadHeads(nn.Module):
-    """
-    A read head is designed to fetch information out of
-    the NTM datastructure. It does this by using a combination
-    of the current memory, the control state, and the prior weights.
-
-    This is designed to contain all the read heads. Since read heads
-    do not cross interact, we can do our reads in a vectorized manner.
-
-    It operates by generating a prior weights tensor if it does not already
-    exist, and considering resetting portions of said tensor to default if
-    the model thinks it should help. It then generates the index weights
-    and performs a weighted sum over the memory region.
-
-    The output becomes the memory and the new prior weights.
-    """
-    def force_reset_weights(self,
-                    reset_mask: torch.Tensor,
-                    weights: torch.Tensor
-                    ):
-        """
-        Forces a reset of particular batch dimensions within the weights,
-        returning new weights.
-        :param reset_mask: A bool tensor consisting of the batch shape. True means to reset that
-                batch
-        :param weights: The current weights. This will possess shape ... x (ensemble) x num_heads x memory_width
-        :return: A new weights tensor with certain elements reset. It will have shape
-                    .... x (ensemble) x num_heads x memory_width
-        """
-        weights = self.weight_resetter.force_reset(reset_mask, weights)
-        return weights
-
-    def __init__(self,
-                 memory_size: int,
-                 memory_width: int,
-                 num_heads: int,
-                 control_width: int,
-                 shift_kernel_width: int,
-                 ensemble_shape: Optional[Core.StandardShapeType] = None,
-                 dtype: Optional[torch.dtype] = None,
-                 device: Optional[torch.device] = None,
-                 ):
-
-        self.memory_size = memory_size
-        self.memory_width = memory_width
-        self.num_heads = num_heads
-        self.control_width = control_width
-        self.shift_kernel_width = shift_kernel_width
-
-        super().__init__()
-        # Define the indexer used to make the read weights, and other
-        # related interaction mechanisms
-
-        self.weight_resetter = WeightsResetter(control_width,
-                                                       memory_size,
-                                                       memory_width,
-                                                       ensemble_shape,
-                                                       dtype = dtype,
-                                                       device = device)
-        self.make_read_weights = Indexer(memory_size,
-                                    memory_width,
-                                    control_width,
-                                    shift_kernel_width,
-                                    ensemble_shape,
-                                    dtype=dtype,
-                                    device=device)
-
-
-    def forward(self,
-                control_state: torch.Tensor,
-                memory: torch.Tensor,
-                prior_weights: Optional[torch.Tensor]=None)->Tuple[torch.Tensor, torch.Tensor]:
-
-        """
-        Performs the read operation
-
-        :param control_state: A ... x control_width tensor used to control actions
-        :param memory: A ... x mem_size x mem_width memory tensor
-        :param prior_weights: The prior weights from last time, a ... x mem_size probability weights tensor.
-                            Notably, this can be left out, in which case it makes a default that fits
-                            the batch shape.
-        :return:
-            A ...  x mem_width tensor of memory read output
-            A ... x mem_size probability weights tensor indicating the current probability results.
-        """
-
-
-        if prior_weights is None:
-            # Make a default prior weights tensor if it does not exists.
-            batch_dims = control_state.dim() - 1 - self.ensemble_shape.shape[-1]
-            batch_shape = control_state.shape[:batch_dims]
-            prior_weights = self.weight_resetter.setup_new_weights(batch_shape)
-        else:
-            # Reset the prior weights if we think it might help
-            prior_weights = self.weight_resetter(control_state, prior_weights)
-
-        # Make the weights, then perform the weighted sum and return
-
-        weights = self.make_read_weights(control_state,
-                                         memory,
-                                         prior_weights) # should be ... x (ensemble) x mem_size
-        output = torch.matmul(weights.unsqueeze(-1), memory)
-        return output, weights
 
 class WriteHead(nn.Module):
     """
