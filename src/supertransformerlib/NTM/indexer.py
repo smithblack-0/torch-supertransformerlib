@@ -183,6 +183,7 @@ class Indexer(nn.Module):
         :param prior_weights: A ... x mem_num tensor of prior float wieghts
         """
 
+        assert torch.all(prior_weights >= 0)
         control_tensors = self.create_control_tensors(control_state)
         content_weights = self.content_addressing(memory,
                                                   control_tensors["content_key"],
@@ -192,6 +193,10 @@ class Indexer(nn.Module):
                                    prior_weights)
         weights = self.shift(control_tensors["shift_probabilities"],
                              weights)
+
+        if torch.any(torch.isnan(weights)):
+            raise Exception("Not a numer")
         weights = self.sharpen(control_tensors["sharpening_logit"],
                                weights)
+
         return weights

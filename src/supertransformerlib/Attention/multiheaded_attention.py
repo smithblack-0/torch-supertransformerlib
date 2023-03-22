@@ -6,7 +6,7 @@ from typing import Optional
 
 import torch
 from torch import nn
-from supertransformerlib.Basics.head_generation import MakeHead, MergeHeads
+from supertransformerlib.Basics.head_management import MakeHead, MergeHeads
 from supertransformerlib import Core
 
 

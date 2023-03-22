@@ -1,4 +1,4 @@
-from typing import Optional, Tuple
+from typing import Optional, Tuple, List
 
 import torch
 from torch import nn
@@ -8,51 +8,107 @@ from supertransformerlib import Core
 from supertransformerlib.NTM.indexer import Indexer
 from supertransformerlib.NTM.reset import WeightsResetter
 
-class NTMBase(nn.Module):
-    """
-    The base class for an NTM reader/writer/resetter, it
-    contains the logic needed in order to create
-    head handling layers.
-    """
-    def make_head_creator(self,
-                          input_width: int,
-                          num_heads: int,
-                          creation_mode: str
-                          )->nn.Module:
-        task = "making head generator"
-        if creation_mode == "reshape":
-            if input_width % num_heads != 0:
-                msg = f"""\
-                The head width is the control width divided by the number of heads.
 
-                It is the case the current head creation specification is not allowed.
-                The mode is 'reshape' and we are asking for a number of heads equal
-                to {num_heads}. However, this does not divide cleanly into {input_width}
-                """
-                msg = Core.dedent(msg)
-                raise Core.Errors.ValidationError("HeadWidthProblem", msg, task)
-            head_width = input_width // num_heads
-            return Core.Reshape(input_width, [num_heads, head_width])
-        elif creation_mode == "project":
-            head_width = input_width // num_heads
-            if head_width < 1:
-                msg = f"""\
-                The head width is the control width divided by the number of heads.
+class MemDefaults(nn.Module):
+    """
+    A NTM extension layer designed to contain within it the default state for
+    the memory units across the ensemble, along with any and all logic which
+    could demand interaction with such a entity.
+    """
 
-                It is the case the current head width, after completing this process,
-                is less than one which is not allowed             
-                """
-                msg = Core.dedent(msg)
-                raise Core.Errors.ValidationError("HeadWidthProblem", msg, task)
+    def __init__(self,
+                 memory_size: int,
+                 memory_width: int,
+                 ensemble_shape: Optional[Core.StandardShapeType] = None,
+                 dtype: Optional[torch.dtype] = None,
+                 device: Optional[torch.device] = None,
+                 ):
+        """
+        Initialize the memory defaults, by creating a parameter which possesses
+        the memory size and width and including any ensemble directives
+
+        :param memory_size: The number of memory elements
+        :param memory_width: The width of the memory embeddings
+        :param ensemble_shape: The shape of any ensemble. Can be int, list[int], or 1d tensor
+        :param dtype: The dtype
+        :param device: The device
+        """
+
+        if ensemble_shape is not None:
+            shape: List[int] = Core.standardize_shape(ensemble_shape).tolist()
+            shape = shape + [memory_size, memory_width]
         else:
-            msg = f"""\
-            creation mode was not among "reshape" or "project"
-            """
-            msg = Core.dedent(msg)
-            raise ValueError(msg)
-    def make_head_collapser
+            shape = [memory_size, memory_width]
 
+        memory_default = torch.zeros(shape, dtype=dtype, device=device)
+        torch.nn.init.kaiming_uniform_(memory_default)
+        self.memory_default = memory_default
 
+    @torch.jit.export
+    def make_memory(self,
+                    batch_shape: Core.StandardShapeType)->torch.Tensor:
+        """
+        Makes a memory unit compatible with the batch by broadcasting across
+        the batch shape.
+
+        :param batch_shape: The shape of the batch, quite literally. Can be a int, a list of ints, or a 1d
+                            tensor
+        :return: A memory tensor of shape batch_shape... x (...ensemble) x memory_size x memory_width
+        """
+        memory_default = self.memory_default
+        shape: List[int] = Core.standardize_shape(batch_shape).tolist()
+        batch_len = len(shape)
+        expand_shape = shape + [-1]*self.memory_default.dim()
+        for _ in range(batch_len):
+            memory_default = memory_default.unsqueeze(0)
+        memory = memory_default.expand(expand_shape)
+        return memory
+    @torch.jit.export
+    def reset_memory(self,
+                     memory: torch.Tensor,
+                     reset_probabilities: torch.Tensor) -> torch.Tensor:
+        """
+        A section for resetting memories to their default values. This uses the
+        reset probabilities tensor. This is done as an extrapolation between their
+        current and reset values
+
+        :param memory: A memory tensor, of shape
+                        (...batch_shape) x (ensemble_shape...) x memory_size x memory_width.
+
+                        It is literally the memories
+        :param reset_probabilities: The reset probabilities, which is a float tensor of shape
+                        (...batch_shape) x (ensemble_shape...) x memory_size with values
+                        between 0 and 1. 0 indicates do not reset, 1 indicates completely
+                        reset
+        :return: The memory tensor, with the indicated elements reset
+        """
+        reset_probabilities = reset_probabilities.unsqueeze(-1)
+        reset_values = self.memory_default.expand_as(memory)
+        updated_memory = memory * (1 - reset_probabilities) + reset_values * reset_probabilities
+        return updated_memory
+
+class MemManager(nn.Module):
+    """
+    A layer to create empty memory and/or
+    read/write parameter blocks, and manage
+    resetting them when appropriate for new batches.
+
+    * Make memory block in the first place
+    * Make weight blocks in the first place
+    * Reset entire memory to default values
+    * Reset only weight channels when appropriate to default values
+    *
+
+    The layer will accept a control state alongside
+    """
+
+class Resetter(nn.Module):
+    """
+    A layer designed to reset a NTM memory unit and the
+    associated read and write parameters back to
+    default values, or even make it in the first
+    place.
+    """
 
 class Reader(nn.Module):
     """
@@ -74,9 +130,9 @@ class Reader(nn.Module):
                  num_heads: int,
                  control_width: int,
                  shift_kernel_width: int,
-                 ensemble_shape: Optional[Core.StandardShapeType] = None,
                  head_creation_mode: Optional[str] = "project",
-                 head_merge_mode: Optional[str] =
+                 head_merge_mode: Optional[str] = "weighted_sum",
+                 ensemble_shape: Optional[Core.StandardShapeType] = None,
                  dtype: Optional[torch.dtype] = None,
                  device: Optional[torch.device] = None,
 
@@ -118,29 +174,40 @@ class Reader(nn.Module):
 
         super().__init__()
 
-        # We need to make a layer responsible for reshaping control state
-        # to possess the same number of heads as the weights tensor. This
-        # is accomplished here by creating either a reshape or linear
-        # projection layer.
+        # We need to make the layers responsible for
+        # creating and merging heads. Heads will need to
+        # be created on the control stte tensor, and when
+        # merging we will be merging the memory tensor stack
 
+        self.create_heads = Basics.MakeHead(control_width, num_heads,
+                                            mode=head_creation_mode,
+                                            parallel=ensemble_shape,
+                                            dtype=dtype,
+                                            device=device)
+        self.merge_heads = Basics.ReductiveMergeHeads(memory_width,
+                                                      num_heads,
+                                                      mode=head_merge_mode,
+                                                      parallel=ensemble_shape,
+                                                      dtype=dtype,
+                                                      device=device)
 
+        # Define the NTM indexing mechanism. Notice how we are expecting to
+        # recieve control tensors of head width, not control width. Also, note
+        # that the ensemble content must have the head width added to it to
+        # create the proper parallel kernels. This ensures the index generation
+        # is entirely indepedent between heads: There is no reuse of parameters as in
+        # a convolution.
 
-            self.create_heads = Basics.Linear(control_width, [num_heads, head_width], ensemble_shape)
+        if ensemble_shape is not None:
+            ensemble_shape = Core.standardize_shape(ensemble_shape, "ensemble_shape")
+            ensemble_shape = torch.concat([ensemble_shape, torch.tensor([num_heads])], dim=-1)
+        else:
+            ensemble_shape = torch.tensor([num_heads])
 
-        # Merging the results back together has a few options associated with it.
-
-        # Define the indexer used to make the read weights, and other
-        # related interaction mechanisms
-
-        self.weight_resetter = WeightsResetter(control_width,
-                                                       memory_size,
-                                                       memory_width,
-                                                       ensemble_shape,
-                                                       dtype = dtype,
-                                                       device = device)
-        self.make_read_weights = Indexer(memory_size,
+        self.make_read_weights = Indexer(
+                                    memory_size,
                                     memory_width,
-                                    control_width,
+                                    self.create_heads.head_width,
                                     shift_kernel_width,
                                     ensemble_shape,
                                     dtype=dtype,
@@ -150,35 +217,52 @@ class Reader(nn.Module):
     def forward(self,
                 control_state: torch.Tensor,
                 memory: torch.Tensor,
-                prior_weights: Optional[torch.Tensor]=None)->Tuple[torch.Tensor, torch.Tensor]:
+                read_weights: torch.Tensor)->Tuple[torch.Tensor, torch.Tensor]:
 
         """
         Performs the read operation
 
         :param control_state: A ... x control_width tensor used to control actions
         :param memory: A ... x mem_size x mem_width memory tensor
-        :param prior_weights: The prior weights from last time, a ... x mem_size probability weights tensor.
+        :param read_weights: The prior read weights from last time, a ... x heads x mem_size probability weights tensor.
                             Notably, this can be left out, in which case it makes a default that fits
                             the batch shape.
         :return:
             A ...  x mem_width tensor of memory read output
-            A ... x mem_size probability weights tensor indicating the current probability results.
+            A ... x heads x mem_size probability weights tensor indicating the current probability results.
         """
 
+        # Create head states on the control state and memory tensors
+        # Note that we have to add a virtual items dimension onto the
+        # control tensor and then remove it
 
-        if prior_weights is None:
-            # Make a default prior weights tensor if it does not exists.
-            batch_dims = control_state.dim() - 1 - self.ensemble_shape.shape[-1]
-            batch_shape = control_state.shape[:batch_dims]
-            prior_weights = self.weight_resetter.setup_new_weights(batch_shape)
-        else:
-            # Reset the prior weights if we think it might help
-            prior_weights = self.weight_resetter(control_state, prior_weights)
+        control_state = self.create_heads(control_state.unsqueeze(-2)).squeeze(-2) #
+        memory = memory.unsqueeze(-3)
 
-        # Make the weights, then perform the weighted sum and return
-
+        # Make the new read weights
         weights = self.make_read_weights(control_state,
                                          memory,
-                                         prior_weights) # should be ... x (ensemble) x mem_size
-        output = torch.matmul(weights.unsqueeze(-1), memory)
+                                         read_weights
+                                         )
+        # Do the read, merge the heads
+        headed_output = torch.matmul(weights.unsqueeze(-2), memory)
+        output = self.merge_heads(headed_output).squeeze(-2)
+
+        # return
         return output, weights
+
+class Writer(nn.Module):
+    """
+    A collection of write heads designed to insert information back
+    into an NTM memory datastructure, while recursively keeping
+    in mind the prior actions.
+    NTM datastructure. This is performed by using the prior read
+    weights, the control state, and the current memory.
+
+    Multiple read heads are contained within the structure and all
+    work alongside the input to handle the particular problem being
+    worked upon.
+
+    The output of the reader will be the read result and the
+    updated reader_weights
+    """
