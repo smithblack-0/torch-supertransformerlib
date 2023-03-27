@@ -181,7 +181,7 @@ class Storage:
             if read_default.shape != read_weight.shape[-read_default.dim():]:
                 msg = f"""\
                 Default shape and weights are mismatched. For the {type}, 
-                the read weights had final dimensions of {read_weight.shape[-read_default.dim():]}
+                the write weights had final dimensions of {read_weight.shape[-read_default.dim():]}
                 while the read_defaults had shape {read_default.shape}
                 """
                 msg = Core.dedent(msg)
