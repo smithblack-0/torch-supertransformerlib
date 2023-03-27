@@ -1,4 +1,4 @@
-from typing import Optional, Tuple, List
+from typing import Optional, Tuple, List, Dict
 
 import torch
 from torch import nn
@@ -6,109 +6,7 @@ from torch import nn
 from supertransformerlib import Basics
 from supertransformerlib import Core
 from supertransformerlib.NTM.indexer import Indexer
-from supertransformerlib.NTM.reset import WeightsResetter
-
-
-class MemDefaults(nn.Module):
-    """
-    A NTM extension layer designed to contain within it the default state for
-    the memory units across the ensemble, along with any and all logic which
-    could demand interaction with such a entity.
-    """
-
-    def __init__(self,
-                 memory_size: int,
-                 memory_width: int,
-                 ensemble_shape: Optional[Core.StandardShapeType] = None,
-                 dtype: Optional[torch.dtype] = None,
-                 device: Optional[torch.device] = None,
-                 ):
-        """
-        Initialize the memory defaults, by creating a parameter which possesses
-        the memory size and width and including any ensemble directives
-
-        :param memory_size: The number of memory elements
-        :param memory_width: The width of the memory embeddings
-        :param ensemble_shape: The shape of any ensemble. Can be int, list[int], or 1d tensor
-        :param dtype: The dtype
-        :param device: The device
-        """
-
-        if ensemble_shape is not None:
-            shape: List[int] = Core.standardize_shape(ensemble_shape).tolist()
-            shape = shape + [memory_size, memory_width]
-        else:
-            shape = [memory_size, memory_width]
-
-        memory_default = torch.zeros(shape, dtype=dtype, device=device)
-        torch.nn.init.kaiming_uniform_(memory_default)
-        self.memory_default = memory_default
-
-    @torch.jit.export
-    def make_memory(self,
-                    batch_shape: Core.StandardShapeType)->torch.Tensor:
-        """
-        Makes a memory unit compatible with the batch by broadcasting across
-        the batch shape.
-
-        :param batch_shape: The shape of the batch, quite literally. Can be a int, a list of ints, or a 1d
-                            tensor
-        :return: A memory tensor of shape batch_shape... x (...ensemble) x memory_size x memory_width
-        """
-        memory_default = self.memory_default
-        shape: List[int] = Core.standardize_shape(batch_shape).tolist()
-        batch_len = len(shape)
-        expand_shape = shape + [-1]*self.memory_default.dim()
-        for _ in range(batch_len):
-            memory_default = memory_default.unsqueeze(0)
-        memory = memory_default.expand(expand_shape)
-        return memory
-    @torch.jit.export
-    def reset_memory(self,
-                     memory: torch.Tensor,
-                     reset_probabilities: torch.Tensor) -> torch.Tensor:
-        """
-        A section for resetting memories to their default values. This uses the
-        reset probabilities tensor. This is done as an extrapolation between their
-        current and reset values
-
-        :param memory: A memory tensor, of shape
-                        (...batch_shape) x (ensemble_shape...) x memory_size x memory_width.
-
-                        It is literally the memories
-        :param reset_probabilities: The reset probabilities, which is a float tensor of shape
-                        (...batch_shape) x (ensemble_shape...) x memory_size with values
-                        between 0 and 1. 0 indicates do not reset, 1 indicates completely
-                        reset
-        :return: The memory tensor, with the indicated elements reset
-        """
-        reset_probabilities = reset_probabilities.unsqueeze(-1)
-        reset_values = self.memory_default.expand_as(memory)
-        updated_memory = memory * (1 - reset_probabilities) + reset_values * reset_probabilities
-        return updated_memory
-
-class MemManager(nn.Module):
-    """
-    A layer to create empty memory and/or
-    read/write parameter blocks, and manage
-    resetting them when appropriate for new batches.
-
-    * Make memory block in the first place
-    * Make weight blocks in the first place
-    * Reset entire memory to default values
-    * Reset only weight channels when appropriate to default values
-    *
-
-    The layer will accept a control state alongside
-    """
-
-class Resetter(nn.Module):
-    """
-    A layer designed to reset a NTM memory unit and the
-    associated read and write parameters back to
-    default values, or even make it in the first
-    place.
-    """
+from supertransformerlib.NTM.state_utilities import StateTensor
 
 class Reader(nn.Module):
     """
@@ -125,6 +23,7 @@ class Reader(nn.Module):
     """
 
     def __init__(self,
+                 reader_name: str,
                  memory_size: int,
                  memory_width: int,
                  num_heads: int,
@@ -132,14 +31,13 @@ class Reader(nn.Module):
                  shift_kernel_width: int,
                  head_creation_mode: Optional[str] = "project",
                  head_merge_mode: Optional[str] = "weighted_sum",
+                 allow_reset_weights: Optional[bool] = True,
                  ensemble_shape: Optional[Core.StandardShapeType] = None,
                  dtype: Optional[torch.dtype] = None,
                  device: Optional[torch.device] = None,
-
-
                  ):
         """
-
+        :param reader_name: A string indicating what reader this is.
         :param memory_size: The size of the auxilary memory in terms of memory units
         :param memory_width: The width of the memory embeddings
         :param num_heads: The number of heads to make
@@ -164,6 +62,7 @@ class Reader(nn.Module):
 
         # Store natural parameters.
 
+        self.name = reader_name
         self.memory_size = memory_size
         self.memory_width = memory_width
         self.num_heads = num_heads
@@ -173,6 +72,8 @@ class Reader(nn.Module):
         self.head_creation_mode = head_creation_mode
 
         super().__init__()
+
+
 
         # We need to make the layers responsible for
         # creating and merging heads. Heads will need to
@@ -213,43 +114,64 @@ class Reader(nn.Module):
                                     dtype=dtype,
                                     device=device)
 
+        # If the head resetting mechanism is active, we will also
+        # need to get a projection to handle that.
+
+        if allow_reset_weights:
+            self.make_reset_logit = Basics.Linear(self.create_heads.head_width,
+                                                  1,
+                                                  ensemble_shape
+                                                  )
+        else:
+            self.make_reset_probabilities = None
+
+
 
     def forward(self,
                 control_state: torch.Tensor,
-                memory: torch.Tensor,
-                read_weights: torch.Tensor)->Tuple[torch.Tensor, torch.Tensor]:
+                state_tensor: StateTensor)->Tuple[torch.Tensor, StateTensor]:
 
         """
         Performs the read operation
 
         :param control_state: A ... x control_width tensor used to control actions
-        :param memory: A ... x mem_size x mem_width memory tensor
-        :param read_weights: The prior read weights from last time, a ... x heads x mem_size probability weights tensor.
-                            Notably, this can be left out, in which case it makes a default that fits
-                            the batch shape.
+        :param state_tensor: The state tensor object for the current NTM action.
         :return:
             A ...  x mem_width tensor of memory read output
-            A ... x heads x mem_size probability weights tensor indicating the current probability results.
+            A StateTensor that has had one of it's weights entries updated.
         """
 
-        # Create head states on the control state and memory tensors
-        # Note that we have to add a virtual items dimension onto the
-        # control tensor and then remove it
+        # Fetch the relevant information out of the state tensor
 
-        control_state = self.create_heads(control_state.unsqueeze(-2)).squeeze(-2) #
+        memory = state_tensor.memory
+        weights = state_tensor.read_weights[self.name]
+        defaults = state_tensor.read_defaults[self.name]
+
+        # Create head states on the control tensor, and on the memory tensor
+
+        control_state = self.create_heads(control_state.unsqueeze(-2)).squeeze(-2)
+        memory = state_tensor.memory
         memory = memory.unsqueeze(-3)
+
+        # Reset the read weights, per head, if considered appropriate
+
+        if self.make_reset_probabilities is not None:
+            reset_probabilities = torch.sigmoid(self.make_reset_logit(control_state))
+            weights = weights *(1 - reset_probabilities) + defaults * reset_probabilities
+
 
         # Make the new read weights
         weights = self.make_read_weights(control_state,
                                          memory,
-                                         read_weights
+                                         weights
                                          )
         # Do the read, merge the heads
         headed_output = torch.matmul(weights.unsqueeze(-2), memory)
         output = self.merge_heads(headed_output).squeeze(-2)
 
-        # return
-        return output, weights
+        # Commit state then return results
+        state_tensor = state_tensor.set_weight(self.name, weights)
+        return output, state_tensor
 
 class Writer(nn.Module):
     """
@@ -265,4 +187,137 @@ class Writer(nn.Module):
 
     The output of the reader will be the read result and the
     updated reader_weights
+    """
+
+class NTM_Builder:
+    """
+    The NTM builder is responsible, perhaps unsuprisingly, for building a
+    working NTM stetup. It is capable of building a variable number of read,
+    write, and reset heads and acting appropriately when such a head is
+    encountered.
+
+    It can be utilized to build the required nn.Module layers, and then
+    the .finalize method can be used to finish the process and return the
+    final layer.
+
+    The controller is not built by this mechanism.
+
+    --- methods ---
+
+    .make_reader
+    .make_writer
+    .finalize()
+    """
+    # The challenges that need to be met in order for the NTM
+    # layer to function consistently are primarily challenges
+    # involving where the default parameters may lie.
+
+    # Our goal in the builder are as follows
+    #   * Create the default parameters to be loaded into the master NTM layer later
+    #   * Make reader layers, and whatever defaults are needed
+    #   * Make writer layers, and whatever defaults are needed
+    #
+    # Finally, at the end
+    #   * Make a master layer which holds the default parameters, loads them into
+    #   a dictionary, and otherwise is really useful for managing state.
+
+    # The whole point of all this is to end up with a single dictionary of state information
+    # which all the layers agree on regarding what corrolates with what.
+
+    def make_reader(self,
+                    num_heads: int,
+                    shift_kernel_width: int,
+                    head_creation_mode: Optional[str] = "project",
+                    head_merge_mode: Optional[str] = "weighted_sum",
+                    reset_mode: Optional[str] = "None"
+                    )->Reader:
+        """
+        This will create a reader, and stash away the defaults for
+        later usage. See layer "Reader" for more information
+
+        :param num_heads: The number of heads the reader should use
+        :param shift_kernel_width: The width of the shift kernel. Wider will allow more drastic jumps
+        :param head_creation_mode: How to convert the control state into control head. The modes are
+                                   "reshape" and "project"
+        :param head_merge_mode: How to merge the read heads bock together. Whatever the mode, the
+                                return will be of memory width. The three modes are "sum", "weighted_sum",
+                                and "project".
+        :param reset_mode: Whether and to what degree
+        :return: A reader layer, which can be utilized with a control state and a state dictionary to perform
+                a NTM read.
+        """
+
+
+
+    def __init__(self,
+                 memory_size: int,
+                 memory_width: int,
+                 control_width: int,
+                 ensemble_shape: Optional[Core.StandardShapeType] = None,
+                 dtype: Optional[torch.dtype] = None,
+                 device: Optional[torch.device] = None,
+                 ):
+        """
+        :param memory_size: The number of memory elements we will have
+        :param memory_width: The width of the memory embeddings
+        :param control_width: The width of the control state embeddings
+        :param ensemble_shape: The ensemble dimensions if they exist
+        :param dtype: The dtype if they exist
+        :param device: The device if they exist.
+        """
+
+        self.memory_size = memory_size
+        self.memory_width = memory_width
+        self.control_width = control_width
+        self.ensemble_shape = ensemble_shape
+        self.dtype = dtype
+        self.device = device
+
+        # Create memory parameter
+        memory_shape = [memory_size, memory_width]
+        if ensemble_shape is not None:
+            ensemble_shape: List[int] = Core.standardize_shape(ensemble_shape, "ensemble_shape").tolist()
+            memory_shape = ensemble_shape + memory_shape
+
+        memory_parameter = torch.zeros(memory_shape, dtype=dtype, device=device)
+        torch.nn.init.kaiming_uniform_(memory_parameter)
+        memory_parameter = nn.Parameter(memory_parameter)
+        self.memory_default = memory_parameter
+
+        # Create storage locations for read and write parameters. Also, create the
+        # read and write head counts.
+
+        self.reader_count = 0
+        self.writer_count = 0
+
+        self.reader_defaults: Dict[str, nn.Parameter] = {}
+        self.writer_defaults: Dict[str, nn.Parameter] = {}
+
+class NTM(nn.Module):
+    """
+    The NTM layer is responsible for two distinct actions.
+
+    --- setup ----
+
+    The NTM layer is responsible for creating demanded read, write, and reset layers
+    when so demanded. Read and write layers may be created straightforwardly enough
+    by calling the appropriate methods.
+
+    .make_reader
+    .make_writer
+
+    Meanwhile, a resetter layer can be made in one of several manners
+
+    .make_syncronous_resetter
+    .make_weight_resetter
+
+    Once all construction is
+
+    --- defaults_creation ---
+
+    The layer is capable of setting up a default block of state parameters
+    compatible with a batch. This is done with the
+
+    .make_batch function
+
     """
