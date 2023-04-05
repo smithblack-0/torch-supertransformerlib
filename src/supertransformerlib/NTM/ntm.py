@@ -403,6 +403,11 @@ class Refresher(nn.Module):
     back towards defaults, and even allowing the model to decide when to reset
     a batch.
     """
+    def __init__(self,
+                 mem_size: int,
+                 mem_width: int,
+
+                 ):
 class NTM_Builder:
     """
     The NTM builder is responsible, perhaps unsurprisingly, for building a
