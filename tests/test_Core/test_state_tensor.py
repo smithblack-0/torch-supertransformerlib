@@ -207,3 +207,76 @@ class TestBatchStateTensorConstructor(unittest.TestCase):
 
         if PRINT_ERROR_MESSAGES:
             print(err.exception)
+
+class TestPerformBioperandArithmetic(unittest.TestCase):
+    def test_type_cases(self):
+        # Test various type cases for the function
+
+        # Prepare instance
+
+
+        # Prepare input tensors
+
+        tensors = {
+            "a": torch.randn(5, 3),
+            "b": torch.randn(5, 2),
+        }
+
+        state_tens = state_tensor.BatchStateTensor(1, tensors)
+        scalar_int = 2
+        scalar_float = 2.0
+        tensor = torch.randn([5])
+
+        # Test state, float arithmetic works
+
+        result1 = state_tens.perform_bioperand_arithmetic(state_tens, "add", scalar_float)
+        result2 = state_tens.perform_bioperand_arithmetic(scalar_float, "add", state_tens)
+        self.assertTrue(torch.allclose(tensors["a"] + scalar_float, result2["a"]))
+        self.assertTrue(result1 == result2)
+
+        # Test state-tensor arithmetic
+        res = bst.perform_bioperand_arithmetic(tensor1, "", tensor2)
+        self.assertTrue(torch.allclose(res, tensor1 + tensor2))
+
+        # Test tensor-int arithmetic
+        res = perform_bioperand_arithmetic(tensor1, "+", scalar_int)
+        self.assertTrue(torch.allclose(res, tensor1 + scalar_int))
+
+        # Test tensor-float arithmetic
+        res = perform_bioperand_arithmetic(tensor1, "+", scalar_float)
+        self.assertTrue(torch.allclose(res, tensor1 + scalar_float))
+
+        # Test int-tensor arithmetic
+        res = perform_bioperand_arithmetic(scalar_int, "+", tensor1)
+        self.assertTrue(torch.allclose(res, scalar_int + tensor1))
+
+        # Test float-tensor arithmetic
+        res = perform_bioperand_arithmetic(scalar_float, "+", tensor1)
+        self.assertTrue(torch.allclose(res, scalar_float + tensor1))
+
+    def test_operators(self):
+        # Test various operators for the function
+
+        # Prepare input tensors
+        tensor1 = torch.tensor([[1, 2], [3, 4]], dtype=torch.float32)
+        tensor2 = torch.tensor([[5, 6], [7, 8]], dtype=torch.float32)
+
+        # Test addition
+        res = perform_bioperand_arithmetic(tensor1, "+", tensor2)
+        self.assertTrue(torch.allclose(res, tensor1 + tensor2))
+
+        # Test subtraction
+        res = perform_bioperand_arithmetic(tensor1, "-", tensor2)
+        self.assertTrue(torch.allclose(res, tensor1 - tensor2))
+
+        # Test multiplication
+        res = perform_bioperand_arithmetic(tensor1, "*", tensor2)
+        self.assertTrue(torch.allclose(res, tensor1 * tensor2))
+
+        # Test division
+        res = perform_bioperand_arithmetic(tensor1, "/", tensor2)
+        self.assertTrue(torch.allclose(res, tensor1 / tensor2))
+
+        # Test power
+        res = perform_bioperand_arithmetic(tensor1, "**", tensor2)
+        self.assertTrue(torch.allclose(res, tensor1 ** tensor2))
