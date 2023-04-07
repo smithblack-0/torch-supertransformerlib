@@ -1,6 +1,7 @@
 import torch
 import unittest
-from supertransformerlib.Core import state_tensor
+import itertools
+from supertransformerlib.Core import bundle_tensor
 
 PRINT_ERROR_MESSAGES = True
 
@@ -13,7 +14,7 @@ class TestImmutableDictBehavior(unittest.TestCase):
     def test_init(self):
 
         data = {'a': torch.tensor([1, 2, 3]), 'b': torch.tensor([4, 5, 6])}
-        imm_dict = state_tensor.BatchStateTensor(0, data)
+        imm_dict = bundle_tensor.BundleTensor(0, data)
         self.assertEqual(imm_dict['a'].tolist(), [1, 2, 3])
         self.assertEqual(imm_dict['b'].tolist(), [4, 5, 6])
         self.assertEqual(len(imm_dict), 2)
@@ -22,7 +23,7 @@ class TestImmutableDictBehavior(unittest.TestCase):
 
     def test_immutable(self):
         data = {'a': torch.tensor([1, 2, 3]), 'b': torch.tensor([4, 5, 6])}
-        imm_dict = state_tensor.BatchStateTensor(0, data)
+        imm_dict = bundle_tensor.BundleTensor(0, data)
         with self.assertRaises(TypeError):
             imm_dict['a'] = torch.tensor([7, 8, 9])
         with self.assertRaises(TypeError):
@@ -31,7 +32,7 @@ class TestImmutableDictBehavior(unittest.TestCase):
     def test_set(self):
         data = {'a': torch.tensor([1, 2, 3]), 'b': torch.tensor([4, 5, 6])}
         constraint = {"a" : ["embedding"], "b" : ["embedding"]}
-        imm_dict = state_tensor.BatchStateTensor(0, data, constraint)
+        imm_dict = bundle_tensor.BundleTensor(0, data, constraint)
 
 
         new_dict = imm_dict.set('a', torch.tensor([7, 8, 9]), dim_names=["embedding"])
@@ -43,15 +44,15 @@ class TestImmutableDictBehavior(unittest.TestCase):
 
     def test_hash(self):
         data = {'a': torch.tensor([1, 2, 3]), 'b': torch.tensor([4, 5, 6])}
-        imm_dict = state_tensor.BatchStateTensor(0, data)
+        imm_dict = bundle_tensor.BundleTensor(0, data)
 
         hash1 = hash(imm_dict)
         data2 = {'a': torch.tensor([7, 8, 9]), 'b': torch.tensor([4, 5, 6])}
-        imm_dict2 = state_tensor.BatchStateTensor(0, data2)
+        imm_dict2 = bundle_tensor.BundleTensor(0, data2)
         hash2 = hash(imm_dict2)
 
         data3 = {key : value.clone() for key, value in data.items()}
-        imm_dict3 = state_tensor.BatchStateTensor(0, data3)
+        imm_dict3 = bundle_tensor.BundleTensor(0, data3)
         hash3 = hash(imm_dict3)
         self.assertNotEqual(hash1, hash2)
         self.assertEqual(hash1, hash3)
@@ -60,8 +61,8 @@ class TestImmutableDictBehavior(unittest.TestCase):
         # create test data
         data = {"a": torch.tensor([1, 2, 3]), "b": torch.tensor([4, 5, 6]), "c": torch.tensor([7, 8, 9])}
         # create ImmutableDict instance
-        immutable_dict = state_tensor.BatchStateTensor(0,
-                                                       data)
+        immutable_dict = bundle_tensor.BundleTensor(0,
+                                                   data)
         # get the items as a list of tuples
         items = immutable_dict.items()
         # check that the length is correct
@@ -75,7 +76,7 @@ class TestImmutableDictBehavior(unittest.TestCase):
         # create test data
         data = {"a": torch.tensor([1, 2, 3]), "b": torch.tensor([4, 5, 6]), "c": torch.tensor([7, 8, 9])}
         # create ImmutableDict instance
-        immutable_dict = state_tensor.BatchStateTensor(0, data)
+        immutable_dict = bundle_tensor.BundleTensor(0, data)
         # get the keys as a list
         keys = immutable_dict.keys()
         # check that the length is correct
@@ -88,7 +89,7 @@ class TestImmutableDictBehavior(unittest.TestCase):
         # create test data
         data = {"a": torch.tensor([1, 2, 3]), "b": torch.tensor([4, 5, 6]), "c": torch.tensor([7, 8, 9])}
         # create ImmutableDict instance
-        immutable_dict = state_tensor.BatchStateTensor(0, data)
+        immutable_dict = bundle_tensor.BundleTensor(0, data)
         # get the values as a list
         values = immutable_dict.values()
         # check that the length is correct
@@ -102,8 +103,8 @@ class TestImmutableDictBehavior(unittest.TestCase):
         data1 = {"a": torch.tensor([1, 2, 3]), "b": torch.tensor([4, 5, 6])}
         data2 = {"c": torch.tensor([7, 8, 9]), "d": torch.tensor([10, 11, 12])}
         # create ImmutableDict instances
-        immutable_dict1 = state_tensor.BatchStateTensor(0, data1)
-        immutable_dict2 = state_tensor.BatchStateTensor(0, data2)
+        immutable_dict1 = bundle_tensor.BundleTensor(0, data1)
+        immutable_dict2 = bundle_tensor.BundleTensor(0, data2)
         # update the first dictionary with the second
         updated_dict = immutable_dict1.update(immutable_dict2)
         # check that the updated dictionary contains all key-value pairs from both original dictionaries
@@ -122,26 +123,15 @@ class TestBatchStateTensorConstructor(unittest.TestCase):
             "a": torch.randn(5, 3),
             "b": torch.randn(5, 2),
         }
-        bst = state_tensor.BatchStateTensor(1, tensors)
+        bst = bundle_tensor.BundleTensor(1, tensors)
         self.assertEqual(bst.batch_dim, 1)
         self.assertEqual(bst.tensors, tensors)
         self.assertEqual(bst.batch_shape, (5,))
 
     def test_no_tensors(self):
         tensors = {}
-        with self.assertRaises(ValueError) as err:
-            bst = state_tensor.BatchStateTensor(1, tensors)
-
-        if PRINT_ERROR_MESSAGES:
-            print(err.exception)
-
-    def test_different_rank_tensors(self):
-        tensors = {
-            "a": torch.randn(5, 3),
-            "b": torch.randn(5, 2, 4),
-        }
-        with self.assertRaises(ValueError) as err:
-            bst = state_tensor.BatchStateTensor(1, tensors)
+        with self.assertRaises(bundle_tensor.ConstructorNoTensorsError) as err:
+            bst = bundle_tensor.BundleTensor(1, tensors)
 
         if PRINT_ERROR_MESSAGES:
             print(err.exception)
@@ -151,8 +141,8 @@ class TestBatchStateTensorConstructor(unittest.TestCase):
             "a": torch.randn(5, 3),
             "b": torch.randn(5, 2).to(torch.int32),
         }
-        with self.assertRaises(ValueError) as err:
-            bst = state_tensor.BatchStateTensor(1, tensors)
+        with self.assertRaises(bundle_tensor.ConstructorBadTensorDtypeError) as err:
+            bst = bundle_tensor.BundleTensor(1, tensors)
 
         if PRINT_ERROR_MESSAGES:
             print(err.exception)
@@ -163,8 +153,8 @@ class TestBatchStateTensorConstructor(unittest.TestCase):
             "a": torch.randn(5, 3),
             "b": torch.randn(5, 2).to("cuda"),
         }
-        with self.assertRaises(ValueError) as err:
-            bst = state_tensor.BatchStateTensor(1, tensors)
+        with self.assertRaises(bundle_tensor.ConstructorBadTensorDeviceError) as err:
+            bst = bundle_tensor.BundleTensor(1, tensors)
 
         if PRINT_ERROR_MESSAGES:
             print(err.exception)
@@ -175,7 +165,7 @@ class TestBatchStateTensorConstructor(unittest.TestCase):
             "b": torch.randn(5, 2),
         }
         with self.assertRaises(AssertionError) as err:
-            bst = state_tensor.BatchStateTensor(-1, tensors)
+            bst = bundle_tensor.BundleTensor(-1, tensors)
 
         if PRINT_ERROR_MESSAGES:
             print(err.exception)
@@ -186,8 +176,8 @@ class TestBatchStateTensorConstructor(unittest.TestCase):
             "a": torch.randn(5, 3),
             "b": torch.randn(5, 2),
         }
-        with self.assertRaises(ValueError) as err:
-            bst = state_tensor.BatchStateTensor(2, tensors)
+        with self.assertRaises(bundle_tensor.ConstructorBadTensorBatchShape) as err:
+            bst = bundle_tensor.BundleTensor(2, tensors)
 
         if PRINT_ERROR_MESSAGES:
             print(err.exception)
@@ -202,8 +192,8 @@ class TestBatchStateTensorConstructor(unittest.TestCase):
             "b": ["items", "embeddings"],
         }
 
-        with self.assertRaises(ValueError) as err:
-            bst = state_tensor.BatchStateTensor(1, tensors, invalid_constraints_spec)
+        with self.assertRaises(bundle_tensor.ConstructorTensorsViolateDimensionalConstraint) as err:
+            bst = bundle_tensor.BundleTensor(1, tensors, invalid_constraints_spec)
 
         if PRINT_ERROR_MESSAGES:
             print(err.exception)
@@ -211,18 +201,21 @@ class TestBatchStateTensorConstructor(unittest.TestCase):
 class TestPerformBioperandArithmetic(unittest.TestCase):
     """
     This section tests the underlying arithmatic function which
-    is used to impliment the magic methods. Most of the logic
+    is used to impliment the magic methods.
+
+    Tests are performed by creating the various test i
     """
     def setUp(self):
+        # In
 
         # Construct the root instance. This is what the
         # function will be called from
 
         data_tensors = {
-            "a": torch.randn(5, 3),
-            "b": torch.randn(5, 2),
+            "a": torch.rand(5, 3),
+            "b": torch.rand(5, 2),
         }
-        root_state_tensor = state_tensor.BatchStateTensor(1, data_tensors)
+        root_bundle_tensor = bundle_tensor.BundleTensor(1, data_tensors)
 
         # Construct the various numeric entities which we can interact with peacefully. This
         # consists of floats, ints, tensors, and state tensors. Store them in a dictionary
@@ -230,14 +223,15 @@ class TestPerformBioperandArithmetic(unittest.TestCase):
         operand_examples_dict = {}
         operand_examples_dict["float"] = 2.0
         operand_examples_dict["int"] = 4
-        operand_examples_dict["batch_tensor"] = torch.randn([5])
-        operand_examples_dict["same_shape_state"] = root_state_tensor
+        operand_examples_dict["batch_tensor"] = torch.rand([5])
+        operand_examples_dict["same_shape_state"] = root_bundle_tensor
 
-        batch_tensors = {"a" : torch.randn(5),
-                         "b" : torch.randn(5)}
-        operand_examples_dict["broadcast_state_tensor"] = state_tensor.BatchStateTensor(1, batch_tensors)
+        batch_tensors = {"a" : torch.rand(5),
+                         "b" : torch.rand(5)}
+        operand_examples_dict["broadcast_bundle_tensor"] = bundle_tensor.BundleTensor(1, batch_tensors)
 
-        # Construct the various operators we need to work properly under
+        # Construct the various operator keywords which need to
+        # be passed into the class
 
         operators_dict = {}
         operators_dict["add"] = "add"
@@ -246,87 +240,65 @@ class TestPerformBioperandArithmetic(unittest.TestCase):
         operators_dict["divide"] = "divide"
         operators_dict["power"] = "power"
 
+        # Construct the functional definitions of the operators before,
+        # so we can do easy validation.
+
+        operators_functions = {}
+        operators_functions["add"] = lambda x, y : x + y
+        operators_functions["subtract"] = lambda x, y : x - y
+        operators_functions["multiply"] = lambda x, y : x * y
+        operators_functions["divide"] = lambda x, y : x / y
+        operators_functions["power"] = lambda x, y : x ** y
+
         # Store the cases
 
-        self.root_state = root_state_tensor
+        self.data_tensors = data_tensors
+        self.root_state = root_bundle_tensor
         self.operand_cases = operand_examples_dict
         self.operator_cases = operators_dict
+        self.operator_functions = operators_functions
 
 
-    def test_options(self):
-        # Test the various combinations of type and operator, and ensure they work
+    def test_permutation_options(self):
+        # Test the various permutations of operand and operator. Make sure
+        # they all work together. Product, from itertools, produces every combination
 
+        for operand_name, operator_name in itertools.product(self.operand_cases, self.operator_cases):
+            operand = self.operand_cases[operand_name]
+            operator = self.operator_cases[operator_name]
 
+            try:
+                # Test that the operator actually is functioning when called
+                result1 = self.root_state.perform_bioperand_arithmetic(self.root_state, operator, operand)
+                result2 = self.root_state.perform_bioperand_arithmetic(operand, operator, self.root_state)
 
+                # Test the tensors are being properly updated. We do this
+                # by manually iterating over the operand and operator, and
+                # calculating what the results SHOULD be.
 
-    def test_type_cases_control(self):
-        # Test various type cases for the function
+                operator = self.operator_functions[operator_name]
 
-        # Prepare input tensors
+                for key in self.data_tensors.keys():
+                    if isinstance(operand, bundle_tensor.BundleTensor):
+                        # It was a state tensor. Fetch, expand the key
+                        suboperand = operand[key]
+                        while suboperand.dim() < self.root_state[key].dim():
+                            suboperand = suboperand.unsqueeze(-1)
+                    elif isinstance(operand, torch.Tensor):
+                        suboperand = operand
+                        while suboperand.dim() < self.root_state[key].dim():
+                            suboperand = suboperand.unsqueeze(-1)
 
-        data_tensors = {
-            "a": torch.randn(5, 3),
-            "b": torch.randn(5, 2),
-        }
-        batch_tensors = {"a" : torch.randn(5),
-                         "b" : torch.randn(5)}
+                    else:
+                        suboperand = operand
 
+                    expected1 = operator(self.root_state[key], suboperand)
+                    expected2 = operator(suboperand, self.root_state[key])
 
-        state_tens = state_tensor.BatchStateTensor(1, data_tensors)
-        batch_state_tens = state_tensor.BatchStateTensor(1, batch_tensors)
-        scalar_int = 2
-        scalar_float = 2.0
-        tensor = torch.randn([5])
+                    self.assertTrue(torch.allclose(expected1, result1[key]))
+                    self.assertTrue(torch.allclose(expected2, result2[key]))
 
-        # Test state, float arithmetic works
-
-        result1 = state_tens.perform_bioperand_arithmetic(state_tens, "add", scalar_float)
-        result2 = state_tens.perform_bioperand_arithmetic(scalar_float, "add", state_tens)
-        self.assertTrue(torch.allclose(data_tensors["a"] + scalar_float, result2["a"]))
-        self.assertTrue(result1 == result2)
-
-        # Test state, int arithmetic works
-
-        result1 = state_tens.perform_bioperand_arithmetic(state_tens, "add", scalar_int)
-        self.assertTrue(torch.allclose(data_tensors["a"] + scalar_int, result2["a"]))
-        self.assertTrue(result1 == result2)
-
-        # Test state-tensor arithmetic works
-        result1 = state_tens.perform_bioperand_arithmetic(state_tens, "add", tensor)
-        result2 = state_tens.perform_bioperand_arithmetic(tensor, "add", state_tens)
-        self.assertTrue(torch.allclose(data_tensors["a"] + tensor.unsqueeze(-1), result1["a"]))
-        self.assertTrue(result1 == result2)
-
-        # Test state-state same shape arithmetic works
-
-        result = state_tens.perform_bioperand_arithmetic(state_tens, "add", state_tens)
-
-        # Test state - state broadcast arithmetic works
-
-        result = state_tens.perform_bioperand_arithmetic(state_tens, "add", batch_state_tens)
-    def test_operators(self):
-        # Test various operators for the function
-
-        # Prepare input tensors
-        tensor1 = torch.tensor([[1, 2], [3, 4]], dtype=torch.float32)
-        tensor2 = torch.tensor([[5, 6], [7, 8]], dtype=torch.float32)
-
-        # Test addition
-        res = perform_bioperand_arithmetic(tensor1, "+", tensor2)
-        self.assertTrue(torch.allclose(res, tensor1 + tensor2))
-
-        # Test subtraction
-        res = perform_bioperand_arithmetic(tensor1, "-", tensor2)
-        self.assertTrue(torch.allclose(res, tensor1 - tensor2))
-
-        # Test multiplication
-        res = perform_bioperand_arithmetic(tensor1, "*", tensor2)
-        self.assertTrue(torch.allclose(res, tensor1 * tensor2))
-
-        # Test division
-        res = perform_bioperand_arithmetic(tensor1, "/", tensor2)
-        self.assertTrue(torch.allclose(res, tensor1 / tensor2))
-
-        # Test power
-        res = perform_bioperand_arithmetic(tensor1, "**", tensor2)
-        self.assertTrue(torch.allclose(res, tensor1 ** tensor2))
+            except Exception as err:
+                msg = f"Issue when handling operand {operand_name} and operator {operator_name}/n"
+                msg = msg + str(err)
+                raise Exception(msg)

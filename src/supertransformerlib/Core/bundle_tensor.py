@@ -1,119 +1,117 @@
-"""
-A small module to contain classes designed to ease syncronization between collections of
-state tensors
-
-This module contains logic for working with this sort of operation. Emphasis is placed on
-the ability to perform arithmetic with respect to tensors, scalars, and other state
-tensors.
-
-State tensors are designed to be as functional as possible. Modification attempts
-will throw if not being set through the proper channels.
-
-Prototyping:
-
-* Builder exists to make prototype creator.
-* Prototype can then be build by specifying feature name, feature dim labels,
-* Prototype can be finished
-* Prototype can be called with batch_dims, Dict[str, torch.Tensor] and will
-  attempt to build a state tensor to match. It will throw if something is detected as going
-  wrong.
-
-State Tensors:
-
-* Arithmetic
-    * State tensors can perform arithmetic with scalars. This broadcasts across the contents.
-    * State tensors can perform arithmetic with tensors. This broadcasts across the batch dims
-    * State tensors can perform arithmetic with other state tensors. This operates as follows:
-        * If keys differ, throw.
-        * If the tensors have the same shape, just proceed.
-        * If the tensors have different shapes, throw
-
-*
-"""
 
 import torch
 from typing import Optional, Dict, List, Tuple, Union
 from supertransformerlib import Core
 
-class ErrorMessageBuilder:
-    """
-    Primarily a storage helper for error messages,
-    to help restrict my namespace.
-    """
-    @staticmethod
-    def constructor_no_tensors_message()->str:
+
+class BundleTensorError(Exception):
+    """ The general bundle error class"""
+    pass
+
+class ConstructorError(BundleTensorError):
+    """ Triggered when an error occurs during constructor validation"""
+    pass
+
+class ArithmeticError(BundleTensorError):
+    """ Triggered when an error is caught during arithmetic action"""
+    pass
+
+class ConstructorNoTensorsError(ConstructorError):
+    def __str__(self):
         msg = """\
-        An issue has occurred when creating a state tensor. The 
-        state tensor was expected to be initialized with a collection
+        An issue has occurred when creating a bundle tensor. The 
+        bundle tensor was expected to be initialized with a collection
         of tensors. However, no tensors were actually provided in the
         dictionary.
         """
         msg = Core.dedent(msg)
         return msg
 
-    @staticmethod
-    def constructor_bad_rank_message(violating_name: str,
-                                     expected_rank: int,
-                                     got_rank: int)->str:
+
+class ConstructorBadRankError(ConstructorError):
+    def __init__(self, violating_name: str, expected_rank: int, got_rank: int):
+        self.violating_name = violating_name
+        self.expected_rank = expected_rank
+        self.got_rank = got_rank
+
+    def __str__(self):
         msg = f"""\
         An issue has occurred when creating a state tensor. The rank
-        for tensor {violating_name} is bad. The expected rank, to
-        match the batch dims, was {expected_rank}. However, it 
-        was found instead to have rank {got_rank}.
-        
-        Since {got_rank} is less than {expected_rank}, construction failed.
+        for tensor {self.violating_name} is bad. The expected rank, to
+        match the batch dims, was {self.expected_rank}. However, it 
+        was found instead to have rank {self.got_rank}.
+
+        Since {self.got_rank} is less than {self.expected_rank}, construction failed.
         """
         msg = Core.dedent(msg)
         return msg
 
-    @staticmethod
-    def constructor_bad_tensor_dtype_message(violating_name: str,
-                                             violating_type: torch.dtype,
-                                             base_name: str,
-                                             base_type: torch.dtype)->str:
+class ConstructorBadTensorDtypeError(ConstructorError):
+    def __init__(self,
+                 violating_name: str,
+                 violating_type: torch.dtype,
+                 base_name: str,
+                 base_type: torch.dtype):
+        self.violating_name = violating_name
+        self.violating_type = violating_type
+        self.base_name = base_name
+        self.base_type = base_type
+    def __str__(self):
         msg = f"""\
         An issue has been encountered during construction. The tensor feature of name
-        {violating_name} had dtype {violating_type}. However, the tensor feature of
-        name {base_name} had dtype {base_type}. Differing dtypes are not allowed. 
+        {self.violating_name} had dtype {self.violating_type}. However, the tensor feature of
+        name {self.base_name} had dtype {self.base_type}. Differing dtypes are not allowed. 
         """
         msg = Core.dedent(msg)
         return msg
 
-    @staticmethod
-    def constructor_bad_tensor_device_message(violating_name: str,
-                                              violating_device: torch.device,
-                                              base_name: str,
-                                              base_device: torch.device)->str:
+class ConstructorBadTensorDeviceError(ConstructorError):
+    def __init__(self, violating_name: str, violating_device: torch.device, base_name: str, base_device: torch.device):
+        self.violating_name = violating_name
+        self.violating_device = violating_device
+        self.base_name = base_name
+        self.base_device = base_device
+
+    def __str__(self):
         msg = f"""\
         An issue has been encountered during construction. The tensor feature of name
-        {violating_name} had device {violating_device}. However, the tensor feature of
-        name {base_name} had device {base_device}. Differing dtypes are not allowed. 
+        {self.violating_name} had device {self.violating_device}. However, the tensor feature of
+        name {self.base_name} had device {self.base_device}. Differing devices are not allowed. 
         """
         msg = Core.dedent(msg)
         return msg
 
-    @staticmethod
-    def constructor_bad_tensor_batch_shape_message(violating_name: str,
-                                                   total_shape: List[int],
-                                                   violating_shape: List[int],
-                                                   expected_name: str,
-                                                   expected_shape: List[int],
-                                                   )->str:
+class ConstructorBadTensorBatchShape(ConstructorError):
+    def  __init__(self,
+                    violating_name: str,
+                    total_shape: List[int],
+                    violating_shape: List[int],
+                    expected_name: str,
+                    expected_shape: List[int],
+                    ):
+
+        self.violating_name = violating_name
+        self.total_shape = total_shape
+        self.violating_shape = violating_shape
+        self.expected_name = expected_name
+        self.expected_shape = expected_shape
+
+    def __str__(self):
         msg = f"""\
         An issue has been encountered while making a new state tensor. The tensor feature
-        of name {violating_name} had shape {total_shape}.
-        
-        Its batch shape was {violating_shape}. However, the expected batch shape, based 
-        on {expected_name}, was {expected_shape}.
-        
+        of name {self.violating_name} had shape {self.total_shape}.
+
+        Its batch shape was {self.violating_shape}. However, the expected batch shape, based 
+        on {self.expected_name}, was {self.expected_shape}.
+
         Since these are not the same, the state tensor failed to syncronize and could
         not be made.
         """
         msg = Core.dedent(msg)
         return msg
 
-    @staticmethod
-    def constructor_tensors_violate_constraint(
+class  ConstructorTensorsViolateDimensionalConstraint(ConstructorError):
+    def __init__(self,
             violated_constraint: str,
             tensor_a_name: str,
             tensor_a_dim_num: int,
@@ -121,148 +119,262 @@ class ErrorMessageBuilder:
             tensor_b_name: str,
             tensor_b_dim_num: int,
             tensor_b_dim_len: int
-            )->str:
+            ):
+
+        self.violated_constraint = violated_constraint
+        self.tensor_a_name = tensor_a_name
+        self.tensor_a_dim_num = tensor_a_dim_num
+        self.tensor_a_dim_len = tensor_a_dim_len
+        self.tensor_b_name = tensor_b_name
+        self.tensor_b_dim_num = tensor_b_dim_num
+        self.tensor_b_dim_len = tensor_b_dim_len
+
+    def __str__(self)->str:
         msg = f"""\
-        An issue has been encountered while making a new state tensor. The
-        constraints established in tensor {tensor_a_name} do not match those
-        in {tensor_b_name} for constraint {violated_constraint}.
+        An issue has been encountered while making a new bundle tensor. The
+        constraints established in tensor {self.tensor_a_name} do not match those
+        in {self.tensor_b_name} for constraint {self.violated_constraint}.
         
-        In particular, a constraint was placed on {tensor_a_name} for dimension
-        {tensor_a_dim_num} which indicated the length should be {tensor_a_dim_len}.
+        In particular, a constraint was placed on '{self.tensor_a_name}' for dimension
+        {self.tensor_a_dim_num} which indicated the length should be {self.tensor_a_dim_len}.
         
-        However, tensor {tensor_b_name}'s dimension {tensor_b_dim_num} had length
-        of {tensor_b_dim_len}.
+        However, tensor '{self.tensor_b_name}''s dimension {self.tensor_b_dim_num} had length
+        of {self.tensor_b_dim_len}.
         
-        Since these are not the same, a state tensor could not be made.
+        Since these are not the same, a bundle tensor could not be made.
         """
         msg = Core.dedent(msg)
         return msg
 
-    @staticmethod
-    def arithmetic_no_state_tensor():
+class  ArithmeticBundleTensorNotFound(ArithmeticError):
+    def __str__(self):
         msg = """\
-        An issue occurred when performing bioperand state arithmetic. It was 
-        expected that at least one of the two operands was a state tensor,
+        An issue occurred when performing bioperand arithmetic. It was 
+        expected that at least one of the two operands was a bundle tensor,
         but neither was found to be one.
         """
         msg = Core.dedent(msg)
         return msg
 
-    @staticmethod
-    def arithmetic_bad_batch_dims(preoperand_batch_rank: int,
-                                  postoperand_batch_rank: int):
+class ArithmeticBadBatchRanks(ArithmeticError):
+
+    def __init__(self,
+                 preoperand_batch_rank: int,
+                 postoperand_batch_rank: int):
+
+        self.preoperand_rank = preoperand_batch_rank
+        self.postoperand_rank = postoperand_batch_rank
+
+    def __str__(self)->str:
         msg = f"""\
-        An issue occurred when performing bioperand state arithmetic. It was 
-        expected that when doing operations between two state tensors the 
-        state tensors will have the same batch rank. However, the first operand
-        has batch rank {preoperand_batch_rank} while the second has batch rank 
-        {postoperand_batch_rank}
-        """
+            An issue occurred when performing bioperand arithmetic. It was 
+            expected that when doing operations between two state tensors the 
+            state tensors will have the same batch rank. However, the first operand
+            has batch rank {self.preoperand_rank} while the second has batch rank 
+            {self.postoperand_rank}
+            """
         msg = Core.dedent(msg)
         return msg
 
-    @staticmethod
-    def arithmetic_bad_batch_shape(preoperand_shape: List[int],
-                                   post_operand_shape: List[int]):
+class ArithmeticBadBatchShapes(ArithmeticError):
+    def __init__(self,
+                 preoperand_shape: List[int],
+                 postoperand_shape: List[int]
+                 ):
+
+        self.preoperand_shape = preoperand_shape
+        self.postoperand_shape = postoperand_shape
+    def __str__(self):
         msg = f"""\
-        An issue occurred when performing bioperand state arithmetic. It was 
-        expected that when doing operations between two state tensors the 
-        state tensors will have the same batch shape. However, the preoperand
-        has batch shape {preoperand_shape} while the postoperand has batch shape 
-        {post_operand_shape}
-        """
+            An issue occurred when performing bioperand arithmetic. It was 
+            expected that when doing operations between two bundle tensors the 
+            bundle tensors will have the same batch rank. However, the first operand
+            has batch shape {self.preoperand_shape} while the second has batch shape 
+            {self.postoperand_shape}. Since these are not the same, the operation
+            failed.
+            """
         msg = Core.dedent(msg)
         return msg
 
-    @staticmethod
-    def arithmetic_bad_state_keys()->str:
+
+class ArithmeticBadStateKeys(ArithmeticError):
+    def __str__(self):
         msg = f"""\
-        An issue occurred when performing bioperand state arithmetic. It was 
-        expected that arithmetic between two states will involve the states
-        sharing keys. However, the keys in the preoperand did not match the
-        keys in the post operand.
-        """
+             An issue occurred when performing bioperand state arithmetic. It was 
+             expected that arithmetic between two states will involve the states
+             sharing keys. However, the keys in the preoperand did not match the
+             keys in the post operand.
+             """
         msg = Core.dedent(msg)
         return msg
 
-    @staticmethod
-    def arithmetic_cannot_reverse_broadcast(key_name: str,
-                                            preoperand_shape: List[int],
-                                            postoperand_shape: List[int],
-                                            location: int):
+class ArithmeticCannotReverseBroadcastError(ArithmeticError):
+    def  __init__(self,
+                    key_name: str,
+                    preoperand_shape: List[int],
+                    postoperand_shape: List[int],
+                    location: int):
+
+        self.key_name = key_name
+        self.preoperand_shape = preoperand_shape
+        self.postoperand_shape = postoperand_shape
+        self.location = location
+
+    def __str__(self) -> str:
         msg = f"""\
         An issue occurred when performing bioperand state arithmetic. It was not possible
-        to reverse broadcast across key {key_name} at dimension {location}. The preoperand
-        shape was shape {preoperand_shape} and had value {preoperand_shape[location]} at
-        the location of interest. However, the postoperand shape was {postoperand_shape}
-        and had value of {postoperand_shape[location]} at the same place.
+        to reverse broadcast across key {self.key_name} at dimension {self.location}. The preoperand
+        shape was shape {self.preoperand_shape} and had value {self.preoperand_shape[self.location]} at
+        the location of interest. However, the postoperand shape was {self.postoperand_shape}
+        and had value of {self.postoperand_shape[location]} at the same place.
         """
         msg = Core.dedent(msg)
         return msg
 
-        pass
 
 
-class BatchStateTensor:
+
+
+class BundleTensor:
     """
-    The native state tensor. This contains within it information on synchronized
-    tensors and their associated current shapes. It also allows easy execution
-    of arithmetic operations
+    The batch bundle tensor is a tensor designed to carry around within it
+    a bundle of tensors which may be said to be coupled together based on
+    having common batch or ensemble dimensions, along with associated
+    tensor based logic for manipulating the entire bundle at once. The
+    pay off is the ability to do things like automatically catch insane
+    errors, and automatically mix together state information in, for
+    example, a router transformer context.
 
-    It is strongly focused on properly asserting restrictions are respected. It also
-    has a strong focus on making arithmetic work.
+    ---- A few words of warning ---
+
+    Note that this class is entirely immutable. This means that any
+    operation which makes a change will in turn return a new updated instance.
+
+    This means you should not use, for example:
+
+    ```
+    bundle.set(...)
+    ```
+
+    but instead
+
+    ```
+    bundle = bundle.set(...)
+    ```
+    ------ constructor ----
+
+    The constructor is one of the most important things to understand
+    when working with a batch bundle tensor. The constructor accepts a parameter
+    indicating how many batch dimensions to enforce, a dictionary for containing
+    the data tensors we will be using, and another optional dictionary for
+    channel constraints.
+
+    The tensor is designed to operate similarly to a dictionary. Tensors
+    may be named, inserted using set, or retrieved. However, unlike a
+    dictionary considerable restraints are placed upon the contents based
+    on the tensor status.
 
 
-    --- construction ---
+    ------ constructor: syncronization of batch dimensions.  ----
 
-    A state tensor is constructed using a group of tensors which need to be linked together
-    as part of a broader batch. The tensors may be named tensors, in which case they will
-    have named dimensions. Named dimensions must be the same length, and regardless the
-    batch dims must be the same as well. The dtype and device must also all be the same.
 
-    Entries are constructed by specifying a number of batch dimensions
-    and passing in a corrolated dictionary of name:tensors and name:dimension_labels.
-    The various tensor entries must have the same batch shape, starting from the leftmost
-    tensor dimension
+    First, all tensors in the dictionary are required to have common batch dimensions. These
+    are the dimensions at the beginning of the tensor, and the number of batch dimensions is
+    a parameter settable on construction in case you wish to do something clever, like use ensembles.
+    Conceptually, manipulation of the entire bundle occurs across the batch dimensions. Attempts to
+    set tensors into the bundle which do not share the current batch dimension will fail, as will
+    attempts to make a bundle with none matching batch dimensions
 
-    As an example, if you have batch dims of 1, or 2, the following would work. However,
-    3 would not
+    For example, if you have a tensor named "a" and "b" as follows, you could make a batch bundle
 
-    tensors = {}
-    tensors["weights"] = torch.randn([3, 4, 6, 5])
-    tensors["defaults"] = torch.randn([3, 4, 2, 5])
+    ```
+    a = torch.randn(5, 3, 7)
+    b = torch.rand(5, 3, 9)
 
-    Observe the first two dimensions are syncronized, but after that
-    they are not. Now, in addition to this, we can also specify
-    names for dimensions. These must then be the same length in all
-    subsequent operations. For example, lets suppose the last dimension
-    of the above were a common embedding dim. We could handle that as:
+    # This works. Note how one batch dimension is specified. The constructor notices it
+    # is '5' for both.
 
-    names = {}
-    names["weights"] = ["embeddings"]
-    names["defaults"] = ["embeddings"]
+    batch_bundle = state_tensors.BatchBundleTensor(1, {'a' : a, 'b' : b})
+    # This also works. Two dimensions, '5, 3', must be matched
 
-    This can then be used as
+    batch_bundle = state_tensors.BatchBundleTensor(2, {'a' : a, 'b' : b})
 
-    BatchStateTensor(batch_dims = 2,
-                    tensors,
-                    names)
+    ```
 
-    --- getting, setting, and modications ---
+    However, since the third dimension is NOT common, the following would not work
 
-    The class, once setup, can be modified but will always return a new
-    instance. It is, to as great a degree as possible, functional.
+    ```
+    # Does not work, due to 3 not being common between a and b
+    batch_bundle = state_tensors.BatchbundleTensor(3, {'a' : a, 'b' : b})
+    ```
 
-    Getting is fairly simple. Just use __getitem__, as in StateTensor["weights"] to fetch
-    what you are looking for.
+    It is also the case that all tensors in the future must satisfy the common batch shape,
+    or alternatively must all be changed to a new shape at once.
 
-    Setting is another story. There are two primary setters to worry about. These are .set and .replace
+    ```
+    batch_bundle = state_tensors.BatchBundleTensor(2, {'a' : a, 'b' : b})
 
-    .set: Sets a single feature, returns a new tensor
-    .replace: Replaces multiple things at once.
+    c = torch.rand([5, 3, 2, 9])
+    d = torch.rand([3, 2, 7, 9])
 
-    Note that you can only set a tensor to a new shape if mutability is allowed, and you
-    still have to update all tensors which have the same changed dimension at once
+    # works
+    batch_bundle = batch_bundle.set("c", c)
+
+    # does NOT work
+    batch_bundle = batch_bundle.set("d", d)
+    ```
+
+    ---- constructor: Additional restrictions with dimensional constraints ----
+
+    Support is also provided for what are referred to as dimensional constraints. These
+    are defined with respect the last dimensions as a list of names per initialized tensor,
+    working from the last dimension to the left. It is designed to ensure that all tensors
+    with the same dimensional constraint have the same length.
+
+    Lets first look at how the constructor associates and constructs constraints. Lets suppose
+    you have a tensor of shape [5, 4, 3, 2, 7]. Passing in a constraint with ["items", "embedding"] would
+    associated dim "2" with items and "7" with embeddings, and assert any future items, embeddings must
+    have the same dimensionality. This would look something like as follows if we are setting up a
+    bundle with only this as an entry
+
+    ```
+    data_dict = {"a" : torch.rand([5, 4, 3, 2, 7])
+    constraint_dict = {"a" : ["items", "embedding"]}
+    batch_bundle = state_tensors.BatchBundleTensor(1, data_dict, constraints_dict)
+    ```
+
+    Notice how the constraints dict matches the key in the data dict, and how the constructor will
+    now corrolate those two. The payoff is that if you try to insert something later on, or create a
+    dict, with nonmatching dimensional constraints an error is thrown and the bundle says this will not
+    work as well as why. For example
+
+    ```
+
+    # Works. Note dimensions are the same
+    batch_bundle = batch_bundle.set("b", torch.rand(5, 2, 7), ["items", "embedding"])
+
+    # Works. Note no constraints are coupled
+
+    batch_bundle = batch_bundle.set("c", torch.randn(5, 4, 7))
+
+    # Does NOT work. Raises error
+
+    batch_bundle = batch_bundle.set("d", torch.rand(5, 2, 8), ["items", "embedding"])
+    ```
+
+
+    ---- manipulation ----
+
+    the class can be manipulated almost exactly like a dictionary, with a
+    few exceptions with regards to how to perform updates. First, to just
+    set a new tensor of the same shape. Namely, the following functions:
+
+    * set:
+    * replace all
+    * update
+    * remove
+
+    Are functional and instead return a new instance.
 
     --- arithmetic ----
 
@@ -288,6 +400,25 @@ class BatchStateTensor:
     * divide
     * power
 
+    As an example, lets suppose you have a routing transformer and only want to update your
+    state information according to what ensemble was being emphasized this round. It mightl
+    look like below
+
+    ```
+
+    # A routing transformer with a batch size of 10 and 8 ensembles
+    routing_weights = torch.rand(10, 8)
+
+    # state
+
+    state  = ... # original tensor bundle. Has batch size of 2, and info of dim 10, 8 for batch state
+    new_state = ... # new state. Same size
+    state = routing_weights * state + (1-routing_weights)*new_state
+    ```
+
+    Observe how no matter what the contents were, it is elegantly combined together into the new state
+    tensor. Very useful.
+
     """
 
 
@@ -306,8 +437,8 @@ class BatchStateTensor:
     def __str__(self) -> str:
         return str(self.tensors)
 
-    def __eq__(self, other: 'BatchStateTensor') -> bool:
-        if not isinstance(other, BatchStateTensor):
+    def __eq__(self, other: 'BundleTensor') -> bool:
+        if not isinstance(other, BundleTensor):
             return False
         if other.keys() != self.keys():
             return False
@@ -320,7 +451,7 @@ class BatchStateTensor:
                 return False
         return True
 
-    def __ne__(self, other: 'BatchStateTensor') -> bool:
+    def __ne__(self, other: 'BundleTensor') -> bool:
         return not self.__eq__(other)
 
     def __iter__(self):
@@ -329,7 +460,7 @@ class BatchStateTensor:
     def __contains__(self, key: str) -> bool:
         return key in self.tensors.keys()
 
-    def set(self, key: str, tensor: torch.Tensor, dim_names: List[str]) -> 'BatchStateTensor':
+    def set(self, key: str, tensor: torch.Tensor, dim_names: Optional[List[str]] = None) -> 'BundleTensor':
         """
         Sets a particular key to a particular tensor value. Will throw an
         error if you are now violating constraints. It can be used to add
@@ -344,19 +475,22 @@ class BatchStateTensor:
         :param value: The new tensor to set here.
         :return: A new BatchStateTensor
         """
+        if dim_names is None:
+            dim_names = self.constraints_spec[key]
+
         new_tensor_data = dict(self.tensors)
         new_dim_data = dict(self.constraints_spec)
 
         new_tensor_data[key] = tensor
         new_dim_data[key] = dim_names
 
-        return BatchStateTensor(
+        return BundleTensor(
             self.batch_dim,
             new_tensor_data,
             new_dim_data,
             self.validate)
 
-    def replace_all(self, tensors: Dict[str, torch.Tensor])->'BatchStateTensor':
+    def replace_all(self, tensors: Dict[str, torch.Tensor])-> 'BundleTensor':
         """
         Sets a group of keys to particular new values. This may be utilized to modify
         things with several constraints on them. It may NOT be used to modify constraints
@@ -369,13 +503,13 @@ class BatchStateTensor:
         for key, value in tensors.items():
             assert key in new_data, f"tensor of key {key} was never in state tensor"
             new_data[key] = tensors[key]
-        return BatchStateTensor(self.batch_dim,
-                                new_data,
-                                self.constraints_spec,
-                                self.validate)
+        return BundleTensor(self.batch_dim,
+                            new_data,
+                            self.constraints_spec,
+                            self.validate)
 
 
-    def remove(self, key: str)->'BatchStateTensor':
+    def remove(self, key: str)-> 'BundleTensor':
         """
         Removes a tensor entry completely.
 
@@ -389,10 +523,10 @@ class BatchStateTensor:
         new_tensors.pop(key)
         new_constraints.pop(key)
 
-        return BatchStateTensor(self.batch_dim,
-                                new_tensors,
-                                new_constraints,
-                                self.validate)
+        return BundleTensor(self.batch_dim,
+                            new_tensors,
+                            new_constraints,
+                            self.validate)
 
     def __setitem__(self, key, value):
         msg = "Cannot modify a state tensor directly\n"
@@ -422,7 +556,7 @@ class BatchStateTensor:
     def values(self) -> List[torch.Tensor]:
         return list(self.tensors.values())
 
-    def update(self, other: 'BatchStateTensor') -> 'BatchStateTensor':
+    def update(self, other: 'BundleTensor') -> 'BundleTensor':
 
         assert other.batch_dim == self.batch_dim
         new_tensors = self.tensors.copy()
@@ -431,7 +565,7 @@ class BatchStateTensor:
         new_tensors.update(other.tensors)
         new_constraints.update(other.constraints_spec)
 
-        return BatchStateTensor(
+        return BundleTensor(
             self.batch_dim,
             new_tensors,
             new_constraints,
@@ -448,12 +582,12 @@ class BatchStateTensor:
 
         # Verify that we actually were handled tensors to make
         if len(tensors) == 0:
-            raise ValueError(ErrorMessageBuilder.constructor_no_tensors_message())
+            raise ConstructorNoTensorsError()
 
         # Verify the rank is satisfactory for all entries
         for key, tensor in tensors.items():
             if batch_dims > tensor.dim():
-                raise ValueError(ErrorMessageBuilder.constructor_bad_rank_message(key, batch_dims, tensor.dim()))
+                raise ConstructorBadRankError(key, batch_dims, tensor.dim())
 
         # Verify that the dtype, device, and batch shape is satisfactory for all entries.
         #
@@ -466,24 +600,24 @@ class BatchStateTensor:
         for key, tensor in tensors.items():
             # Check dtype is sane
             if tensor.dtype != base_dtype:
-                raise ValueError(ErrorMessageBuilder.constructor_bad_tensor_dtype_message(key,
-                                                                                          tensor.dtype,
-                                                                                          base_key,
-                                                                                          base_dtype))
+                raise ConstructorBadTensorDtypeError(key,
+                                                     tensor.dtype,
+                                                     base_key,
+                                                     base_dtype)
             # Check device is sane
             if tensor.device != base_device:
-                raise ValueError(ErrorMessageBuilder.constructor_bad_tensor_device_message(key,
-                                                                                           tensor.device,
-                                                                                           base_key,
-                                                                                           base_device))
+                raise ConstructorBadTensorDeviceError(key,
+                                                      tensor.device,
+                                                      base_key,
+                                                      base_device)
+
             # Check shape is common
             if tensor.shape[:batch_dims] != batch_shape:
-                msg = ErrorMessageBuilder.constructor_bad_tensor_batch_shape_message(key,
-                                                                                     list(tensor.shape),
-                                                                                     list(tensor.shape[:batch_dims]),
-                                                                                     base_key,
-                                                                                     batch_shape)
-                raise ValueError(msg)
+                raise ConstructorBadTensorBatchShape(key,
+                                                     list(tensor.shape),
+                                                     list(tensor.shape[:batch_dims]),
+                                                          base_key,
+                                                          batch_shape)
 
     def _constructor_validate_constraints(self,
                                           tensors: Dict[str, torch.Tensor],
@@ -509,51 +643,16 @@ class BatchStateTensor:
                 else:
                     source_name, source_loc, expected_len = validation_table[name]
                     if expected_len != dim:
-                        msg = ErrorMessageBuilder.constructor_tensors_violate_constraint(name,
-                                                                                         source_name,
-                                                                                         source_loc,
-                                                                                         expected_len,
-                                                                                         key,
-                                                                                         loc,
-                                                                                         dim
-                                                                                         )
+                        raise ConstructorTensorsViolateDimensionalConstraint(name,
+                                                                             source_name,
+                                                                             source_loc,
+                                                                             expected_len,
+                                                                             key,
+                                                                             loc,
+                                                                             dim)
                         raise ValueError(msg)
 
-    def _constructor_get_constraint_lengths(self,
-                                            tensors: Dict[str, torch.Tensor],
-                                            dim_names: Dict[str, List[str]]
 
-                                            )->Dict[str, int]:
-
-        # Gets the constraints and their corrolated values
-        output: Dict[str, int] = {}
-
-        for key, tensor in tensors.items():
-            names = dim_names[key]
-            locs = range(tensor.dim() - len(names), len(names))
-            # Go through each name and it's associated dimension for this tenso
-            for name, loc in zip(names, locs):
-                output[name] = tensor.size(loc)
-        return output
-
-    def _constructor_get_constraint_index_corrolations(self,
-                                               tensors: Dict[str, torch.Tensor],
-                                               dim_names: Dict[str, List[str]],
-                                               )->Dict[str, Dict[str, int]]:
-        # Gets a datastructure that indicates first the indicates tensor feature,
-        # then the constraints within, and finally the index that this constraint connects to
-
-        state_corrolations: Dict[str, Dict[str, int]] = {}
-
-        for key, tensor in tensors.items():
-            tensor_corrolations: Dict[str, int] = {}
-            names = dim_names[key]
-            locs = range(tensor.dim() - len(names), len(names))
-            # Go through each name and it's associated dimension for this tenso
-            for name, loc in zip(names, locs):
-                tensor_corrolations[name] = loc
-            state_corrolations[key] = tensor_corrolations
-        return state_corrolations
     ## Constructor ##
     def __init__(self,
                  # Essential features
@@ -595,8 +694,6 @@ class BatchStateTensor:
             self._constructor_validate_constraints(tensors, dim_names)
 
         self.constraints_spec = dim_names
-        self.constraint_lengths = self._constructor_get_constraint_lengths(tensors, dim_names)
-        self.constraint_indices = self._constructor_get_constraint_index_corrolations(tensors, dim_names)
         self.tensors = tensors
         self.batch_dim = batch_dims
 
@@ -633,28 +730,15 @@ class BatchStateTensor:
                     continue
                 if post_dim == 1:
                     continue
-                raise ValueError(ErrorMessageBuilder.arithmetic_cannot_reverse_broadcast(feature_name,
-                                                                                         preoperand.shape,
-                                                                                         postoperand.shape,
-                                                                                         i))
-            # Expand dimensions
+                raise ArithmeticCannotReverseBroadcastError(feature_name,
+                                                            preoperand.shape,
+                                                            postoperand.shape,
+                                                            i)
+
             while preoperand.dim() < postoperand.dim():
                 preoperand = preoperand.unsqueeze(-1)
             while postoperand.dim() < preoperand.dim():
                 postoperand = postoperand.unsqueeze(-1)
-
-        # Torchscript's type refinement system is really rather
-        # silly in some ways. In order for the operator code to work,
-        # torchscript MUST know what the type is by that point. The
-        # following code provides this type refinement, then does
-        # the actual math. We refine catagories of
-        #
-        # float, float
-        # float, tensor
-        # tensor, float
-        # int, tensor,
-        # tensor, int
-        # tensor, tensor
 
 
         if operator == "add":
@@ -675,7 +759,7 @@ class BatchStateTensor:
                               preoperands: Dict[str, torch.Tensor],
                               operator: str,
                               postoperands: Dict[str, torch.Tensor]
-                              ):
+                              )->Dict[str, torch.Tensor]:
         tensor_updates = {}
         for key in keys:
             preoperand = preoperands[key]
@@ -688,10 +772,10 @@ class BatchStateTensor:
 
 
     def perform_bioperand_arithmetic(self,
-                           operand_one: Union[int, float, torch.Tensor, 'BatchStateTensor'],
-                           operator: str,
-                           operand_two: Union[int, float, torch.Tensor, 'BatchStateTensor'])\
-                                ->'BatchStateTensor':
+                                     operand_one: Union[int, float, torch.Tensor, 'BundleTensor'],
+                                     operator: str,
+                                     operand_two: Union[int, float, torch.Tensor, 'BundleTensor'])\
+                                -> 'BundleTensor':
         """
         This is the base function used to impliment arithmetic for the magic methods. It
         is defined in terms of two operands and the accompanying operator. It is a helper method,
@@ -709,8 +793,8 @@ class BatchStateTensor:
         # input, a lot of work has to go into torchscript type refinement
 
         if isinstance(operand_one, (int, float, torch.Tensor)):
-            if not isinstance(operand_two, BatchStateTensor):
-                raise ArithmeticError(ErrorMessageBuilder.arithmetic_no_state_tensor())
+            if not isinstance(operand_two, BundleTensor):
+                raise ArithmeticBundleTensorNotFound()
 
             # These if statements perform torchscript type refinement. They are needed.
             if isinstance(operand_one, int):
@@ -720,15 +804,16 @@ class BatchStateTensor:
             elif isinstance(operand_one, torch.Tensor):
                 auxilary_tensor = operand_one
             else:
-                raise ValueError() # Really just here to make torchscript happy
+                # Really just here to make torchscript happy. Can never happen
+                raise ValueError("Illegal state. Hit the programmer")
 
             root = operand_two
             operand_one_stack = {key : auxilary_tensor for key in operand_two.keys()}
             operand_two_stack = operand_two.tensors.copy()
 
         elif isinstance(operand_two, (int, float, torch.Tensor)):
-            if not isinstance(operand_one, BatchStateTensor):
-                raise ArithmeticError(ErrorMessageBuilder.arithmetic_no_state_tensor())
+            if not isinstance(operand_one, BundleTensor):
+                raise ArithmeticBundleTensorNotFound()
 
             # These if statements perform torchscript type refinement. They are needed
             if isinstance(operand_two, int):
@@ -744,15 +829,15 @@ class BatchStateTensor:
             operand_one_stack = operand_one.tensors.copy()
             operand_two_stack =  {key: auxilary_tensor for key in operand_one.keys()}
 
-        elif isinstance(operand_one, BatchStateTensor) and isinstance(operand_two, BatchStateTensor):
+        elif isinstance(operand_one, BundleTensor) and isinstance(operand_two, BundleTensor):
             if operand_one.batch_dim != operand_two.batch_dim:
-                raise ArithmeticError(ErrorMessageBuilder.arithmetic_bad_batch_dims(operand_one.batch_dim,
-                                                                                    operand_two.batch_dim))
+                raise ArithmeticBadBatchRanks(operand_one.batch_dim,
+                                              operand_two.batch_dim)
             if operand_one.batch_shape != operand_two.batch_shape:
-                raise ArithmeticError(ErrorMessageBuilder.arithmetic_bad_batch_shape(operand_one.batch_shape,
-                                                                                      operand_two.batch_shape))
+                raise ArithmeticBadBatchShapes(list(operand_one.batch_shape),
+                                               list(operand_two.batch_shape))
             if operand_one.keys() != operand_two.keys():
-                raise ArithmeticError(ErrorMessageBuilder.arithmetic_bad_state_keys())
+                raise ArithmeticBadStateKeys()
 
             root = operand_one
             operand_one_stack = operand_one.tensors.copy()
@@ -760,17 +845,17 @@ class BatchStateTensor:
 
 
         else:
-            raise ValueError()
+            raise ValueError("Illegal operand type")
 
         updates = self.process_operand_stack(root.keys(),
                                              operand_one_stack,
                                              operator,
                                              operand_two_stack)
 
-        return BatchStateTensor(root.batch_dim,
-                                updates,
-                                root.constraints_spec,
-                                root.validate)
+        return BundleTensor(root.batch_dim,
+                            updates,
+                            root.constraints_spec,
+                            root.validate)
 
     # Define the arithmetic magic methods
 
@@ -795,6 +880,6 @@ class BatchStateTensor:
     def __rpow__(self, other):
         return self.perform_bioperand_arithmetic(other, "power", self)
 
-torch.jit.script(BatchStateTensor)
+torch.jit.script(BundleTensor)
 
 

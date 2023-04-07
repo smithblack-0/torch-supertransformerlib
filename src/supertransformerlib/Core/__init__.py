@@ -7,4 +7,4 @@ from . errors import *
 from . kernel import *
 from . reshape_module import *
 from . sample_utils import *
-
+from . bundle_tensor import BundleTensor
