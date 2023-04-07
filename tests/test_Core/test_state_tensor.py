@@ -209,20 +209,71 @@ class TestBatchStateTensorConstructor(unittest.TestCase):
             print(err.exception)
 
 class TestPerformBioperandArithmetic(unittest.TestCase):
-    def test_type_cases(self):
-        # Test various type cases for the function
+    """
+    This section tests the underlying arithmatic function which
+    is used to impliment the magic methods. Most of the logic
+    """
+    def setUp(self):
 
-        # Prepare instance
+        # Construct the root instance. This is what the
+        # function will be called from
 
-
-        # Prepare input tensors
-
-        tensors = {
+        data_tensors = {
             "a": torch.randn(5, 3),
             "b": torch.randn(5, 2),
         }
+        root_state_tensor = state_tensor.BatchStateTensor(1, data_tensors)
 
-        state_tens = state_tensor.BatchStateTensor(1, tensors)
+        # Construct the various numeric entities which we can interact with peacefully. This
+        # consists of floats, ints, tensors, and state tensors. Store them in a dictionary
+
+        operand_examples_dict = {}
+        operand_examples_dict["float"] = 2.0
+        operand_examples_dict["int"] = 4
+        operand_examples_dict["batch_tensor"] = torch.randn([5])
+        operand_examples_dict["same_shape_state"] = root_state_tensor
+
+        batch_tensors = {"a" : torch.randn(5),
+                         "b" : torch.randn(5)}
+        operand_examples_dict["broadcast_state_tensor"] = state_tensor.BatchStateTensor(1, batch_tensors)
+
+        # Construct the various operators we need to work properly under
+
+        operators_dict = {}
+        operators_dict["add"] = "add"
+        operators_dict["subtract"] = "subtract"
+        operators_dict["multiply"] = "multiply"
+        operators_dict["divide"] = "divide"
+        operators_dict["power"] = "power"
+
+        # Store the cases
+
+        self.root_state = root_state_tensor
+        self.operand_cases = operand_examples_dict
+        self.operator_cases = operators_dict
+
+
+    def test_options(self):
+        # Test the various combinations of type and operator, and ensure they work
+
+
+
+
+    def test_type_cases_control(self):
+        # Test various type cases for the function
+
+        # Prepare input tensors
+
+        data_tensors = {
+            "a": torch.randn(5, 3),
+            "b": torch.randn(5, 2),
+        }
+        batch_tensors = {"a" : torch.randn(5),
+                         "b" : torch.randn(5)}
+
+
+        state_tens = state_tensor.BatchStateTensor(1, data_tensors)
+        batch_state_tens = state_tensor.BatchStateTensor(1, batch_tensors)
         scalar_int = 2
         scalar_float = 2.0
         tensor = torch.randn([5])
@@ -231,29 +282,28 @@ class TestPerformBioperandArithmetic(unittest.TestCase):
 
         result1 = state_tens.perform_bioperand_arithmetic(state_tens, "add", scalar_float)
         result2 = state_tens.perform_bioperand_arithmetic(scalar_float, "add", state_tens)
-        self.assertTrue(torch.allclose(tensors["a"] + scalar_float, result2["a"]))
+        self.assertTrue(torch.allclose(data_tensors["a"] + scalar_float, result2["a"]))
         self.assertTrue(result1 == result2)
 
-        # Test state-tensor arithmetic
-        res = bst.perform_bioperand_arithmetic(tensor1, "", tensor2)
-        self.assertTrue(torch.allclose(res, tensor1 + tensor2))
+        # Test state, int arithmetic works
 
-        # Test tensor-int arithmetic
-        res = perform_bioperand_arithmetic(tensor1, "+", scalar_int)
-        self.assertTrue(torch.allclose(res, tensor1 + scalar_int))
+        result1 = state_tens.perform_bioperand_arithmetic(state_tens, "add", scalar_int)
+        self.assertTrue(torch.allclose(data_tensors["a"] + scalar_int, result2["a"]))
+        self.assertTrue(result1 == result2)
 
-        # Test tensor-float arithmetic
-        res = perform_bioperand_arithmetic(tensor1, "+", scalar_float)
-        self.assertTrue(torch.allclose(res, tensor1 + scalar_float))
+        # Test state-tensor arithmetic works
+        result1 = state_tens.perform_bioperand_arithmetic(state_tens, "add", tensor)
+        result2 = state_tens.perform_bioperand_arithmetic(tensor, "add", state_tens)
+        self.assertTrue(torch.allclose(data_tensors["a"] + tensor.unsqueeze(-1), result1["a"]))
+        self.assertTrue(result1 == result2)
 
-        # Test int-tensor arithmetic
-        res = perform_bioperand_arithmetic(scalar_int, "+", tensor1)
-        self.assertTrue(torch.allclose(res, scalar_int + tensor1))
+        # Test state-state same shape arithmetic works
 
-        # Test float-tensor arithmetic
-        res = perform_bioperand_arithmetic(scalar_float, "+", tensor1)
-        self.assertTrue(torch.allclose(res, scalar_float + tensor1))
+        result = state_tens.perform_bioperand_arithmetic(state_tens, "add", state_tens)
 
+        # Test state - state broadcast arithmetic works
+
+        result = state_tens.perform_bioperand_arithmetic(state_tens, "add", batch_state_tens)
     def test_operators(self):
         # Test various operators for the function
 

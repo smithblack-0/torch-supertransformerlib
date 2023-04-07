@@ -693,11 +693,12 @@ class BatchStateTensor:
                            operand_two: Union[int, float, torch.Tensor, 'BatchStateTensor'])\
                                 ->'BatchStateTensor':
         """
-        Performs one of the required arithmetic operations given two proper operands and the
-        operator to apply to them. One of operand one and operand two must be a state tensor
-
+        This is the base function used to impliment arithmetic for the magic methods. It
+        is defined in terms of two operands and the accompanying operator. It is a helper method,
+        and is used by feeding in the operation conditions and the operator when implimenting
+        a magic methods.
         :param operand_one: The first operator to use. May be among int, float, tensor ,state tensor
-        :param operator: The operator to use. Must be among "add", "subtract", "multiply", "divide", or "pow"
+        :param operator: The operator to use. Must be among "add", "subtract", "multiply", "divide", or "power"
         :param operand_two: The second operand to use
         :return: The result of performing arithmetic among the entries
         """
@@ -713,14 +714,16 @@ class BatchStateTensor:
 
             # These if statements perform torchscript type refinement. They are needed.
             if isinstance(operand_one, int):
-                scalar_tensor = torch.tensor(operand_one)
+                auxilary_tensor = torch.tensor(operand_one)
             elif isinstance(operand_one, float):
-                scalar_tensor = torch.tensor(operand_one)
+                auxilary_tensor = torch.tensor(operand_one)
+            elif isinstance(operand_one, torch.Tensor):
+                auxilary_tensor = operand_one
             else:
                 raise ValueError() # Really just here to make torchscript happy
 
             root = operand_two
-            operand_one_stack = {key : scalar_tensor for key in operand_two.keys()}
+            operand_one_stack = {key : auxilary_tensor for key in operand_two.keys()}
             operand_two_stack = operand_two.tensors.copy()
 
         elif isinstance(operand_two, (int, float, torch.Tensor)):
@@ -729,15 +732,17 @@ class BatchStateTensor:
 
             # These if statements perform torchscript type refinement. They are needed
             if isinstance(operand_two, int):
-                scalar_tensor = torch.tensor(operand_two)
+                auxilary_tensor = torch.tensor(operand_two)
             elif isinstance(operand_two, float):
-                scalar_tensor = torch.tensor(operand_two)
+                auxilary_tensor = torch.tensor(operand_two)
+            elif isinstance(operand_two, torch.Tensor):
+                auxilary_tensor = operand_two
             else:
-                raise ValueError() # here to keep torchscript and IDE happy
+                raise ValueError("Impossible condition reached") # here to keep torchscript and IDE happy
 
             root = operand_one
             operand_one_stack = operand_one.tensors.copy()
-            operand_two_stack =  {key: scalar_tensor for key in operand_one.keys()}
+            operand_two_stack =  {key: auxilary_tensor for key in operand_one.keys()}
 
         elif isinstance(operand_one, BatchStateTensor) and isinstance(operand_two, BatchStateTensor):
             if operand_one.batch_dim != operand_two.batch_dim:
