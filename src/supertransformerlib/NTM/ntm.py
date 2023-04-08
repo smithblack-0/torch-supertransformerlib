@@ -8,6 +8,69 @@ from supertransformerlib import Core
 from supertransformerlib.NTM.indexer import Indexer
 from supertransformerlib.NTM.state_utilities import StateTensor
 
+### Defaults mechanisms. Defaults are used commonly to allow
+# the class or classes to reset their heads. They are loaded into a tensor which
+# travels along through the model. They can be loaded in multiple ways, and
+# joined together using .update.
+class DefaultsContainer(nn.Module):
+    """
+    A place wherein NTM default parameters can be kept and refreshed if
+    so desired. This allows for defaults to be learnable parameters as
+    opposed to, for example, a section of text which is being read from.
+
+    Default parameters consist of the values which a NTM model may
+    reset their working parameters too. They tend to be coupled,
+    and one new one should be generated per round.
+
+    The output of the defaults container will be a BundleTensor,
+    which will have the indicated names, shapes, and constraints
+    all coupled together.
+    """
+    def __init__(self,
+                 names: List[str],
+                 kernel_shapes: Dict[str, List[int]],
+                 constraints: Optional[Dict[str, List[str]]] = None,
+                 dtype: Optional[torch.dtype] = None,
+                 device: Optional[torch.device] = None,
+                 ):
+        """
+
+        :param names: The list of named parameter kernels to make
+        :param constraints: A dictionary of optional constraint specifications for the BundleTensor
+        :param kernel_shapes: One key per name. The shape of the default kernel to make, sans batch stuff
+        :param dtype: The kernel dtypes to make
+        :param device: The device to make it on.
+        """
+        super().__init__()
+
+        self.names = names
+        self.constraints = constraints
+        parameters: Dict[str, nn.Parameter] = {}
+        for key in names:
+            param = torch.zeros(kernel_shapes[key], dtype=dtype, device=device)
+            param = nn.init.kaiming_uniform_(param)
+            param = nn.Parameter(param)
+            parameters[key] = param
+
+        self.parameters = nn.ParameterDict(parameters)
+
+    def forward(self)->Core.BundleTensor:
+        # Make a bundle tensor. No batch dimensions, but
+        # some constraints may exist.
+        return Core.BundleTensor(0,
+                                 dict(self.parameters),
+                                 self.constraint
+                                 )
+
+class DefaultsLoader(nn.Module):
+    """
+    A place capable of creating a NTM
+    """
+
+
+
+
+
 class Reader(nn.Module):
     """
     A collection of read heads designed to fetch information out of a

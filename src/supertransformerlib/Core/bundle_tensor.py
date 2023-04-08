@@ -424,6 +424,13 @@ class BundleTensor:
 
     # Define dictionary like helpers
 
+    @property
+    def dtype(self)->torch.dtype:
+        return self._dtype
+
+    @property
+    def device(self)->torch.device:
+        return self._device
 
     def __getitem__(self, key: str) -> torch.Tensor:
         return self.tensors[key]
@@ -572,6 +579,14 @@ class BundleTensor:
             self.validate
         )
 
+    def to(self,
+           dtype: Optional[torch.dtype] = None,
+           device: Optional[torch.device] = None)->'BundleTensor':
+
+        if dtype is None:
+            dtype = self.dtype
+
+
     ## Constructor validation helpers ##
     def _constructor_validate_batch_details(self,
                                batch_dims: int,
@@ -650,8 +665,42 @@ class BundleTensor:
                                                                              key,
                                                                              loc,
                                                                              dim)
-                        raise ValueError(msg)
 
+    def _constructor_get_constraint_lengths(self,
+                                            tensors: Dict[str, torch.Tensor],
+                                            dim_names: Dict[str, List[str]]
+
+                                            ) -> Dict[str, int]:
+
+        # Gets the constraints and their corrolated values
+        output: Dict[str, int] = {}
+
+        for key, tensor in tensors.items():
+            names = dim_names[key]
+            locs = range(tensor.dim() - len(names), len(names))
+            # Go through each name and it's associated dimension for this tenso
+            for name, loc in zip(names, locs):
+                output[name] = tensor.size(loc)
+        return output
+
+    def _constructor_get_constraint_index_corrolations(self,
+                                                       tensors: Dict[str, torch.Tensor],
+                                                       dim_names: Dict[str, List[str]],
+                                                       ) -> Dict[str, Dict[str, int]]:
+        # Gets a datastructure that indicates first the indicates tensor feature,
+        # then the constraints within, and finally the index that this constraint connects to
+
+        state_corrolations: Dict[str, Dict[str, int]] = {}
+
+        for key, tensor in tensors.items():
+            tensor_corrolations: Dict[str, int] = {}
+            names = dim_names[key]
+            locs = range(tensor.dim() - len(names), len(names))
+            # Go through each name and it's associated dimension for this tenso
+            for name, loc in zip(names, locs):
+                tensor_corrolations[name] = loc
+            state_corrolations[key] = tensor_corrolations
+        return state_corrolations
 
     ## Constructor ##
     def __init__(self,
@@ -694,11 +743,17 @@ class BundleTensor:
             self._constructor_validate_constraints(tensors, dim_names)
 
         self.constraints_spec = dim_names
+        self.constraint_lengths = self._constructor_get_constraint_lengths(tensors, dim_names)
+        self.constraint_indices = self._constructor_get_constraint_index_corrolations(tensors, dim_names)
         self.tensors = tensors
         self.batch_dim = batch_dims
 
         key_zero = list(tensors.keys())[0]
-        self.batch_shape = tensors[key_zero].shape[:batch_dims]
+        entry = tensors[key_zero]
+
+        self.batch_shape = entry.shape[:batch_dims]
+        self._dtype = entry.dtype
+        self._device = entry.device
         self.validate = validate
 
     # Torchscripts type refinement is a bitch and a half. There is no way
