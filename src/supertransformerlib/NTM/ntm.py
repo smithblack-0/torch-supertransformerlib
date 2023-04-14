@@ -1,71 +1,373 @@
+"""
+
+This is something of an outline for what I want to accomplish in this module.
+
+Advanced NTM as is implimented in this module consists of several interelated tasks. Due to the addition
+of the reset mechanism, there is a little bit more to handle than in a normal NTM case. These tasks may
+be divided into
+
+* setting up default cases
+* Instancing useful cases
+* Updating cases as model progresses, with possible resets. This includes
+    * Performing read actions.
+    * Performing write actions.
+    * Performing default reset actions.
+
+
+## Usages ##
+
+Two primary usage cases exist for the NTM mechanism designed here. One is
+reading from and updating a collection of embeddings as in, for example,
+a context tensor, while the other involves acting as a backend NTM memory
+unit that is truly differentiable.
+
+## State information ##
+
+State information is retained in entities known as "bundle_tensors" which
+are as immutable as possible. A bundle tensor will typically act like a
+dictionary of tensors which will contain a state entity known as "memory" and a
+bunch of related state entities used by the various readers and writers such as
+"reader_weights_0" or "writer_weights_1"
+
+## Setup ##
+
+Setup is an action which is performed to get a default or original case which
+is usable and can be updated. Depending on the architecture, a model can be
+set up in one of two ways.
+
+The first method of setting up a model is to define a block of parameters correlating
+to the allowed memory states, in a manner very reminiscent to traditional NTM action. Second,
+it is also possible to perform setup by loading in a pre-existing batch of information. Either
+way, the output is a bundle tensor which can be used for further activities.,
+
+Setup will set up, unsuprisingly, the bundle tensor with all the reader weights,
+writer weights, and so on required in order for the model to function.
+
+## Reader ##
+
+Readers accept a bundle tensor and a control state, then go and perform
+their appropriate read using the read weights. They also store away the
+updated read weights, and return both the read result and the new bundle tensor.
+
+Readers are named, with the name corrosponding to the expected bundle entity
+
+## Writer ##
+
+Writers update the implicit state, the bundle tensor underlying everything. It is
+the case a writer will accept a control state, a write entry, and a bundle tensor,
+and write the write entry into the bundle tensor plus update it's write weights.
+
+Writers are named, with the name corrosponding to the bundle entity.
+
+## Updates ##
+
+* Reader
+* Writer
+* Resetter.
+"""
+
+
 from typing import Optional, Tuple, List, Dict
 
 import torch
 from torch import nn
 
+from enum import Enum
 from supertransformerlib import Basics
 from supertransformerlib import Core
 from supertransformerlib.NTM.indexer import Indexer
 from supertransformerlib.NTM.state_utilities import StateTensor
 
-### Defaults mechanisms. Defaults are used commonly to allow
-# the class or classes to reset their heads. They are loaded into a tensor which
-# travels along through the model. They can be loaded in multiple ways, and
-# joined together using .update.
-class DefaultsContainer(nn.Module):
+# Constraints mechanisms.
+#
+# Constraints are certain patterns regarding what corrosponds to what for
+# the last few dimensions of a tensor. For instance, the last dimension of an
+# embedding. This section contains functions which will generate constraints
+
+class ConstraintNames(Enum):
+    TOKEN_DIM: str = "Tokens"
+    ENSEMBLE_DIM: str = "Ensemble_Dim"
+    EMBEDDING_DIM: str = "Embedding_Width"
+def make_ensemble_constraint_list(num_ensemble_dimentions: int)->List[str]:
     """
-    A place wherein NTM default parameters can be kept and refreshed if
-    so desired. This allows for defaults to be learnable parameters as
-    opposed to, for example, a section of text which is being read from.
+    Makes an ensemble constraint list by naming the ensemble dimensions
+    :param num_ensemble_dimentions: The number of ensemble dimensions
+    :return: A list indicating the needed constraints
+    """
+    return [ConstraintNames.ENSEMBLE_DIM + "_" + str(i) for i in range(num_ensemble_dimentions)]
 
-    Default parameters consist of the values which a NTM model may
-    reset their working parameters too. They tend to be coupled,
-    and one new one should be generated per round.
+def make_embedding_constraint(num_ensemble_dimensions: int)->List[str]:
+    """
+    Makes an embedding constraint appropriate for application against a
+    embedding tensor of shape ... (ensemble_dims ... ) x token_items x embedding_width
+    :param num_ensemble_dimensions: The number of ensemble dimensions.
+    :return: The constraint list.
+    """
+    output: List[str] = [ConstraintNames.TOKEN_DIM, ConstraintNames.EMBEDDING_DIM]
+    output = make_ensemble_constraint_list(num_ensemble_dimensions) + output
+    return output
 
-    The output of the defaults container will be a BundleTensor,
-    which will have the indicated names, shapes, and constraints
-    all coupled together.
+def make_weights_constraint(num_ensemble_dimensions: int,
+                            head_name: str,
+                            )->List[str]:
+    """
+    Makes a constraint appropriate for working alongside a weights tensor. This
+    tensor has shape ... x (ensemble_dims... ) x head_name x tokens
+    :param num_ensemble_dimensions: The number of ensemble dimensions
+    :return: A list representing the last dimension's constraint couplings.
+    """
+    output: List[str] = [head_name, ConstraintNames.TOKEN_DIM]
+    output = make_ensemble_constraint_list(num_ensemble_dimensions) + output
+    return output
+
+### Setup mechanisms
+#
+# Setup mechanisms will create the initial bundle tensor used elsewhere in the process,
+# and can create it by a few different methods depending on the model architecture.
+
+class StateNames(Enum):
+    Memory: str = "Memory"
+    Reader: str = "Reader_Weights_Logits"
+    Writer: str = "Writer_Weights_Logits"
+class AbstractSetupLayer(nn.Module):
+    """
+    The abstract name for a setup layer, which is used
+    to set up a bundle tensor.
+
+    The output will always be a bundle tensor. This tensor will
+    have a entry named "Memory" containing the memory state,
+    alongside "Reader_Weights_Logits_{n}" and "Writer_Weights_Logits_{n}" entries containing
+    the recurrent tensors. These names cna be changed by changing the StateNames
+    environmental enum
+    """
+    def forward(self, *args, **kwargs)->Core.BundleTensor:
+        raise NotImplementedError("Forward must be implimented")
+
+class ParametersBasedSetup(AbstractSetupLayer):
+    """
+    The memory based setup layer.
+
+    This layer builds a working memory situation from default
+    parameters and using information about the batch shape. It
+    is useful when using NTM for external addressable memory.
+
+    The forward feature should be called with the shape of the
+    batch we wish to perform NTM against. This batch shape can be
+    complex, or just an int. The return will be broadcast into that
+    batch case.
+
+    For example, for batch shape [3, 4] with memory kernel
+    [8,9, 6] the output memory shape would be [3, 4,  8, 9, 6],
+    with the first two dimensions being achieved by broadcast.
     """
     def __init__(self,
-                 names: List[str],
-                 kernel_shapes: Dict[str, List[int]],
-                 constraints: Optional[Dict[str, List[str]]] = None,
+                 d_model: int,
+                 num_memory_tokens: int,
+                 head_info: Dict[str, int],
+                 ensemble_shape: Optional[Core.StandardShapeType] = None,
                  dtype: Optional[torch.dtype] = None,
-                 device: Optional[torch.device] = None,
+                 device: Optional[torch.device] = None
                  ):
         """
 
-        :param names: The list of named parameter kernels to make
-        :param constraints: A dictionary of optional constraint specifications for the BundleTensor
-        :param kernel_shapes: One key per name. The shape of the default kernel to make, sans batch stuff
-        :param dtype: The kernel dtypes to make
-        :param device: The device to make it on.
+
+        :param d_model: The ensemble width
+        :param num_memory_tokens: The number of physical memory tokens that can be addressed.
+        :param head_info: A dictionary of info about the names of the head, associated with
+                            the number of heads. Both named reader and writer heads, along with whatever
+                            else I think of, end up hanging out here.
+        :param ensemble_shape:  The ensemble shape, if existant
+        :param dtype: The dtype, if existant
+        :param device: The device, if existant.
         """
+
+        # Handle setup
+
         super().__init__()
+        if ensemble_shape is None:
+            ensemble_shape = []
+        ensemble_shape = Core.standardize_shape(ensemble_shape, "ensemble_shape")
+        num_ensemble_dims = ensemble_shape.size(-1)
 
-        self.names = names
-        self.constraints = constraints
-        parameters: Dict[str, nn.Parameter] = {}
-        for key in names:
-            param = torch.zeros(kernel_shapes[key], dtype=dtype, device=device)
-            param = nn.init.kaiming_uniform_(param)
-            param = nn.Parameter(param)
-            parameters[key] = param
+        self.d_model = d_model
+        self.num_memory_tokens = num_memory_tokens
+        self.ensemble_shape = ensemble_shape
+        self.head_info = head_info
 
-        self.parameters = nn.ParameterDict(parameters)
+        # Initialization requires me to create all the needed kernels for
+        # the default parameters and store them away. I also need to account
+        # for any ensemble dimension trickery.
 
-    def forward(self)->Core.BundleTensor:
-        # Make a bundle tensor. No batch dimensions, but
-        # some constraints may exist.
-        return Core.BundleTensor(0,
-                                 dict(self.parameters),
-                                 self.constraint
-                                 )
+        # Start off by handling the memory portions. This kernel will contain everything
+        # we need but the batch dimensions
 
-class DefaultsLoader(nn.Module):
+        mem_shape = torch.tensor([num_memory_tokens, d_model])
+        mem_shape = torch.concat([ensemble_shape, mem_shape], dim=-1)
+        mem_parameters = torch.zeros(mem_shape, dtype=dtype, device=device)
+        mem_parameters = nn.init.kaiming_uniform(mem_parameters)
+        mem_parameters = nn.Parameter(mem_parameters)
+
+        self.mem_parameter = mem_parameters
+        self.mem_constraints = make_embedding_constraint(num_ensemble_dims)
+
+        # Now create the weights kernels. Again, everything but the batch dimensions
+
+        weight_parameters: Dict[str, nn.Parameter] = {}
+        weight_constraints: Dict[str, List[str]] = {}
+        for head_name, head_length in head_info.items():
+
+            # initialize the weight parameter
+            weight_shape = torch.tensor([head_length, num_memory_tokens])
+            weight_shape = torch.concat([ensemble_shape, weight_shape], dim = - 1)
+            weight_parameter = torch.zeros(weight_shape, dtype=dtype, device=device)
+            weight_parameter = nn.init.kaiming_uniform(weight_parameter)
+            weight_parameter = nn.Parameter(weight_parameter)
+
+            # Store it and the constraints
+            weight_parameters[head_name] = weight_parameter
+            weight_constraints[head_name] = make_weights_constraint(num_ensemble_dims, head_name)
+
+        self.weight_parameters = nn.ParameterDict(weight_parameters)
+        self.weight_constraints = weight_constraints
+    def forward(self, batch_shape: Core.StandardShapeType)->Core.BundleTensor:
+
+        batch_shape = Core.standardize_shape(batch_shape, "batch_shape")
+        num_batch_dim = batch_shape.size(-1)
+
+        # Start the memory container, and enlarge the memory block to handle
+        # the various batch cases.
+
+        mem_shape = torch.tensor(self.mem_parameter.shape)
+        mem_shape = torch.concat([batch_shape, mem_shape], dim=-1)
+        mem_target: List[int] = mem_shape.tolist()
+        mem_parameters = torch.broadcast_to(self.mem_parameter, mem_target)
+
+        bundle_tensors = {StateNames.Memory : mem_parameters}
+        bundle_constraints = {StateNames.Memory : self.mem_constraints}
+
+        # Enlarge the weight blocks to handle the various memory cases. Insert
+        # into dictionary
+
+        for name in self.weight_parameters.keys():
+            # We broadcast the weight with the batch dims
+            weight_parameter = self.weight_parameters[name]
+            constraints = self.weight_constraints[name]
+
+            # Figure out the weight shape with the broadcast included. Then broadcast
+            weight_shape = torch.tensor([weight_parameter.shape])
+            weight_shape = torch.concat([batch_shape, weight_shape], dim=-1)
+            weight_target: List[int] = weight_shape.tolist()
+            weight_parameter = torch.broadcast_to(weight_parameter, weight_target)
+
+            # Store the result
+            bundle_tensors[name] = weight_parameter
+            bundle_constraints[name] = constraints
+
+        # Make, return the new bundle tensor
+
+        output = Core.BundleTensor(num_batch_dim,
+                                   bundle_tensors,
+                                   bundle_constraints)
+        return output
+
+class TensorBasedSetup(AbstractSetupLayer):
     """
-    A place capable of creating a NTM
-    """
+   This layer sets up a bundle tensor with the state
+   required for advanced indexing access when provided with
+   a tensor which consists of "memory" of some sort we might
+   wish to read from.
+   """
+
+    def __init__(self,
+                 d_model: int,
+                 weight_info: Dict[str, int],
+                 ensemble_shape: Optional[Core.StandardShapeType] = None,
+                 dtype: Optional[torch.dtype] = None,
+                 device: Optional[torch.device] = None
+                 ):
+        """
+        :param d_model: The embedding width
+        :param weight_info: A dictionary of info about the names of the head, associated with
+                            the number of heads. Both named reader and writer heads, along with whatever
+                            else I think of, end up hanging out here.
+        :param ensemble_shape:  The ensemble shape, if existant
+        :param dtype: The dtype, if existant
+        :param device: The device, if existant.
+        """
+        # Setup
+
+        super().__init__()
+        if ensemble_shape is None:
+            ensemble_shape = []
+
+
+        ensemble_shape = Core.standardize_shape(ensemble_shape, "ensemble_shape")
+        num_ensemble_dim = ensemble_shape.size(-1)
+
+        self.d_model = d_model
+        self.weight_info = weight_info
+        self.ensemble_shape = ensemble_shape
+
+        # In order to be able to setup a tensor properly based on
+        # what I am being provided, I need to have the ability to
+        # create weights based on the provided content. As a result, my
+        # primary responsibility here is to make a content based key
+        # for each head
+
+        weight_keys: Dict[str, nn.Parameter] = {}
+        weight_constraints: Dict[str, List[str]] = {}
+
+        for weight_name, head_length in weight_info.items():
+
+            weight_shape = torch.tensor([head_length, d_model])
+            weight_shape = torch.concat([ensemble_shape, weight_shape], dim=-1)
+            weight_keys = torch.zeros(weight_shape, dtype=dtype, device=device)
+            weight_keys = nn.init.kaiming_normal(weight_keys)
+            weight_keys = nn.Parameter(weight_keys)
+
+            # shape ensemble_shape x head_len x d_model
+
+            weight_keys[weight_name] = weight_keys
+            weight_constraints[weight_name] = make_weights_constraint(num_ensemble_dim, weight_name)
+
+        self.weight_keys = nn.ParameterDict(weight_keys)
+        self.weight_constraints = weight_constraints
+
+    def forward(self, tensor: torch.Tensor)->Core.BundleTensor:
+        """
+        Sets up a bundle tensor ready to be manipulated based on
+        the incoming tensor. The tensor is expected to have shape
+        ...batch_shape x ...ensemble_shape x mem_items x d_model
+
+        :param tensor: A tensor of shape
+                     ...batch_shape x ...ensemble_shape x mem_items x d_model
+        :return: A setup ntm state tensor.
+        """
+        # Store away the tensor into memory
+
+        bundle_tensors = {StateNames.Memory: tensor}
+        bundle_constraints = {StateNames.Memory: self.mem_constraints}
+        num_batch_dims = tensor.dim() - self.ensemble_shape.size(-1) - 2
+
+        # Now, generate the head weight logits for all the various read and
+        # write heads moving forward.
+
+        for name in self.weight_parameters.values():
+
+            weight_key = self.weight_keys[name] # shape ...ensemble_dim x head_len x d_model
+            weight = torch.matmul(weight_key, tensor.transpose(-1, -2))
+            weight_constraint= self.weight_constraints[name]
+
+            bundle_tensors[name] = weight
+            bundle_constraints[name] = weight_constraint
+
+        # Make and return bundled tensor
+
+        output = Core.BundleTensor(num_batch_dims,
+                                   bundle_tensors,
+                                   bundle_constraints
+                                   )
+        return output
 
 
 
