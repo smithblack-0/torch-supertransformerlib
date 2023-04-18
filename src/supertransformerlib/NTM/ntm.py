@@ -6,13 +6,14 @@ Advanced NTM as is implimented in this module consists of several interelated ta
 of the reset mechanism, there is a little bit more to handle than in a normal NTM case. These tasks may
 be divided into
 
-* setting up default cases
-* Instancing useful cases
+* setting up a usage case
 * Updating cases as model progresses, with possible resets. This includes
     * Performing read actions.
     * Performing write actions.
-    * Performing default reset actions.
-
+* Using metalogic
+    * Setting up
+    * Reading from a meta collection
+    * Writing to a mete collection.
 
 ## Usages ##
 
@@ -59,11 +60,14 @@ and write the write entry into the bundle tensor plus update it's write weights.
 
 Writers are named, with the name corrosponding to the bundle entity.
 
-## Updates ##
+## Metacollections ##
+
+Collections may exist which target the shape of a pre-existing
 
 * Reader
 * Writer
-* Resetter.
+* StateReader
+* StateWriter
 """
 
 
@@ -124,7 +128,11 @@ def make_weights_constraint(num_ensemble_dimensions: int,
 #
 # Setup mechanisms will create the initial bundle tensor used elsewhere in the process,
 # and can create it by a few different methods depending on the model architecture.
-
+#
+### What does it look like to setup a bundle tensor?
+#
+# A correctly setup bundle tensor will contain a cluster of significant state
+# information. First, it should have within it a "Memory" entry which contains
 class StateNames(Enum):
     Memory: str = "Memory"
     Reader: str = "Reader_Weights_Logits"
@@ -369,10 +377,6 @@ class TensorBasedSetup(AbstractSetupLayer):
                                    )
         return output
 
-
-
-
-
 class Reader(nn.Module):
     """
     A collection of read heads designed to fetch information out of a
@@ -398,7 +402,6 @@ class Reader(nn.Module):
                  head_creation_mode: Optional[str] = "project",
                  head_merge_mode: Optional[str] = "weighted_sum",
                  ensemble_shape: Optional[Core.StandardShapeType] = None,
-                 allow_resetting_heads: Optional[bool] = False,
                  dtype: Optional[torch.dtype] = None,
                  device: Optional[torch.device] = None,
                  ):
@@ -422,8 +425,6 @@ class Reader(nn.Module):
                                 sum between each head, and "sum" which simply sums across the
                                 appropriate dimension. These each require progressively decreasing
                                 numbers of parameters, and the default is weight
-        :param allow_resetting_heads: Whether or not to allow resetting read head read weights to
-                                     their default values.
         :param dtype: The dtype of the kernels
         :param device: The device of the kernels
         """
@@ -485,22 +486,10 @@ class Reader(nn.Module):
                                     dtype=dtype,
                                     device=device)
 
-        # If the head resetting mechanism is active, we will also
-        # need to get a projection to handle that.
-
-        if allow_resetting_heads:
-            self.make_reset_logit = Basics.Linear(self.create_heads.head_width,
-                                                  1,
-                                                  ensemble_shape
-                                                  )
-        else:
-            self.make_reset_logit = None
-
-
 
     def forward(self,
                 control_state: torch.Tensor,
-                state_tensor: StateTensor)->Tuple[torch.Tensor, StateTensor]:
+                state_tensor: Core.BundleTensor)->Tuple[torch.Tensor, Core.BundleTensor]:
 
         """
         Performs the read operation
@@ -757,22 +746,39 @@ class Writer(nn.Module):
         state_tensor = state_tensor.set_memory(memory)
         return state_tensor
 
-class Refresher(nn.Module):
-    """
-    The NTM refresher is the location where parameters which may need to be
-    syncronized together, such as default parameters and default memory, live. The NTM instance
-    should call the refresher with the state tensor at least once per batch in order to ensure
-    the parameters are fresh within the graph.
+## Meta state storage ##
+#
+# It is possible to store away an entire state in so called
+# "meta" bundles. This section contains setup info for them
+# alongside abilities that allows setting up, reading, writing, and combining
+# ntm states into a meta bundle. The point of this is to be able to quickly,
+# for instance, return to viewing prior tokens.
+#
+# Rather than interacting directly with tensors or the world, meta activities
+# involve transfers between sections of the state.
 
-    It also contains mechanisms for creating an empty batch, resetting a batch
-    back towards defaults, and even allowing the model to decide when to reset
-    a batch.
+class MetaSetup(AbstractSetupLayer):
     """
-    def __init__(self,
-                 mem_size: int,
-                 mem_width: int,
+    A meta setup layer, such as this one, is
+    responsible for getting a meta collection ready for
+    usage for a particular parameter. Meta setup must be
+    bound to a particular feature, such as a reader or writer,
+    in order to be successful.
 
-                 ):
+    This particular layer will track down a target, and
+    create an extension of the target tensor in the meta format.
+
+    Notably
+    """
+
+
+
+
+
+## Builder ###
+#
+# Keeping all the numbers straight is hard. There is a builder to help
+
 class NTM_Builder:
     """
     The NTM builder is responsible, perhaps unsurprisingly, for building a
