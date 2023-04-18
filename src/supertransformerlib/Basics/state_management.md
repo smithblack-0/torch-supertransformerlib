@@ -1,10 +1,5 @@
 # What is this
 
-This is the Background file for working with assistants like chatGPT.
-It contains a background summary of what is going on, and can be used
-to prime the model for useful action when performing development
-Introduction
-
 This document describes a small but highly reusable component
 within a larger library designed to facilitate the implementation
 of advanced indexing mechanisms, such as Neural Turing Machines (NTM).
@@ -31,11 +26,6 @@ and other key components that make up this system. By the end of this document,
 you will have a thorough understanding of how this component can be employed to
 manage stateful information in advanced indexing systems effectively.
 
-# Background
-
-The following is a general summary of what is going on and why. It is
-designed to prime a human or AI language model and provide it with what the 
-general context of what this project is about, so that it/he/she can assist with coding.
 
 # Objective
 
@@ -63,47 +53,48 @@ To summarize, I want to see.
   kick off the learning process.
 * It should be usable by NTM mechanism
 
+
 # State Storage Mechanism
 
-Keeping track of a lot of different states by tracking individual tensors is
-tricky. As a result, the state information is instead stored in a sort of collection.
-The collections are known as "BundleTensors". These are a sort of dictionary-like
-object which is distinguished by a dictionary by several primary differences: 
+Managing state information in complex models like advanced
+indexing mechanisms such as NTM can be challenging. 
+The BundleTensor class is designed to simplify this process by
+providing an efficient way to store and manipulate a collection
+of tensors that share common batch or ensemble dimensions.
 
-* They are immutable, and .set must be used when doing updates to existing contained tensors,
-  and will return a new instance. As a corralary, BundleTensor["tensor_name"] = ... will not work.
-* They enforce constaints. If a dimension corrolates with "embedding" on multiple tensors,
-    all those tensors must have dimensions of the same length. This is true when updating or setting
-* They enforce batch corrolation. If the number of batch dimensions is given as 2, 
-  the first two dimensions of all tensors in the collection must have the same shape
-* They allow arithmetic. Broadcasting, however, works from the first dimension onward 
-  but scalar combinations work without fuss and you can, for instance, superimpose two
-  batch tensors together using weights.
+## Key Features
 
-Other than this, bundle tensors act as dictionaries containing tensors. The 
-init parameters are:
+BundleTensors have several distinguishing features compared to a regular dictionary:
 
-* num_batch_dims: int -> The number of batch dimensions to couple
-* tensors: Dict[str, torch.Tensor] -> The various tensors to store together
-* constraints: Dict[str, List[str]] -> The various constraints to emplace on the provided tensors.
+- Immutability: BundleTensors are immutable. To update or modify 
+the stored tensors, you must use the .set() method, which 
+returns a new instance. Direct assignment, such as 
+- BundleTensor["tensor_name"] = ..., will not work.
+- Constraints Enforcement: BundleTensors enforce constraints on dimensions.
+For example, if multiple tensors have a dimension correlated with "embedding," 
+all those tensors must have the same length for that dimension. This enforcement
+applies to both updates and new tensor assignments.
+- Batch Correlation: BundleTensors enforce a correlation between batch dimensions.
+If the number of batch dimensions is set to 2, the first two dimensions of all
+tensors in the collection must have the same shape.
+- Arithmetic Support: BundleTensors support arithmetic operations with broadcasting 
+that works from the first dimension onwards. Scalar combinations and superimposing
+two BundleTensors with weights are also supported.
 
-Note that the constraints work from the last dimension forward. 
+## Constructor and Storage
 
-### How is the state stored
+The constructor of BundleTensor accepts three parameters:
 
-The state for advanced indexing ntm-like processing is contained within the bundleTensor. This state
-will consist of both the memory under processing itself alongside any stateful information
-such as prior weights which are needed for the next iteration. For the moment, the stored
-information may consist of:
+1. num_batch_dims (int): The number of batch dimensions to couple.
+2. tensors (Dict[str, torch.Tensor]): A dictionary containing the tensors to store together.
+3. constraints (Dict[str, List[str]]): A dictionary specifying the constraints to enforce on the provided tensors.
 
-* Memory: Always labeled with the "Memory" keyword in the bundle tensor
-  * Logit_Weights: Various persistant weights, in a logit format, which can be softmaxed, sigmoid, or
-    otherwise processed to get index weights from prior memory access. An example might
-    be "Reader_Logits_1" or "Writer_Logits_0"
-* Meta_Weights: Various persistent weights that can be stored away based on existing
-  logit weight values, and combined back together to form new ways of focusing on things.
+Note that the constraints work from the last dimension forward. While this section 
+focuses on the storage mechanism and constructor arguments, the BundleTensor class also 
+provides methods for manipulation and arithmetic operations. However, these features are 
+not the primary focus here, and can be found by checking the documentation.
 
-And in general, we can access bundle tensors entries like they are a dictionary
+
 
 # Configuration and Setup
 
@@ -136,7 +127,7 @@ collection object to collect setup layers and an interface. I will define the in
 the setup_loader data entity, the setup_config data entity, and the setup latyer
 
 
-## The SetupCase layer
+## The SetupSublayer layer
 
 I will first define the interface for the layers responsible for 
 actually setting up a usable tensor. It is a class inhereting from
@@ -191,7 +182,7 @@ constraints.
 
 Once all layers have run, we make and return a state tensor.
 
-# StateActionLayer
+# StateUsageLayer
 
 In this architecture, we aim to create a mechanism for handling
 stateful information within a model and provide a way for users
@@ -213,19 +204,6 @@ which is the generated state, along with arbitrary additional
 parameters. This design ensures that the configured state tensor
 with the defined state information is consistently found
 within the same place.
-
-Here is the StateLayer interface:
-
-```python
-class StateLayer(nn.Module):
-    def __init__(self, setup_config: SetupConfig, *args, **kwargs):
-        super().__init__()
-        # Initialize with the provided setup_config and any additional parameters.
-
-    def forward(self, bundle_tensor: BundleTensor, *args, **kwargs):
-        # Perform the necessary operations on the state using the provided BundleTensor.
-        # Return the result, which may not necessarily be a BundleTensor.
-```
 
 By using the StateLayer interface, you can create a modular and maintainable 
 system for managing stateful information in your model. This design allows for 

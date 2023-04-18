@@ -237,7 +237,7 @@ class ArithmeticCannotReverseBroadcastError(ArithmeticError):
 
 class BundleTensor:
     """
-    The batch bundle tensor is a tensor designed to carry around within it
+    The bundle tensor is a tensor designed to carry around within it
     a bundle of tensors which may be said to be coupled together based on
     having common batch or ensemble dimensions, along with associated
     tensor based logic for manipulating the entire bundle at once. The
@@ -578,14 +578,6 @@ class BundleTensor:
             new_constraints,
             self.validate
         )
-
-    def to(self,
-           dtype: Optional[torch.dtype] = None,
-           device: Optional[torch.device] = None)->'BundleTensor':
-
-        if dtype is None:
-            dtype = self.dtype
-
 
     ## Constructor validation helpers ##
     def _constructor_validate_batch_details(self,
